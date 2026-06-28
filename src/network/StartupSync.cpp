@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 
 #include <string>
+#include <vector>
 
 #include "CrossPointSettings.h"
 #include "HttpDownloader.h"
@@ -22,8 +23,14 @@ constexpr char DEFAULT_DEST_PATH[] = "/Sync/test.txt";
 constexpr int WIFI_CONNECT_TIMEOUT_MS = 8000;
 constexpr int HTTP_TIMEOUT_MS = 5000;
 constexpr size_t MAX_MANIFEST_SIZE = 8192;
+constexpr size_t MAX_MANIFEST_FILES = 8;
 constexpr uint32_t TASK_STACK_SIZE = 8192;
 TaskHandle_t syncTaskHandle = nullptr;
+
+struct SyncFile {
+  std::string url;
+  std::string destPath;
+};
 
 std::string trim(const char* value) {
   if (!value) return {};
@@ -120,7 +127,8 @@ bool connectSavedWifi() {
   return true;
 }
 
-bool readManifest(const std::string& serverUrl, std::string& fileUrl, std::string& destPath) {
+bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles) {
+  syncFiles.clear();
   Storage.mkdir("/.crosspoint");
   Storage.remove(MANIFEST_TMP);
 
@@ -162,28 +170,47 @@ bool readManifest(const std::string& serverUrl, std::string& fileUrl, std::strin
     return false;
   }
 
-  JsonObjectConst first = files[0].as<JsonObjectConst>();
-  if (first.isNull()) {
-    LOG_ERR(LOG_TAG, "Manifest first file is invalid");
+  for (JsonObjectConst entry : files) {
+    if (syncFiles.size() >= MAX_MANIFEST_FILES) {
+      LOG_INF(LOG_TAG, "Manifest file limit reached (%zu)", MAX_MANIFEST_FILES);
+      break;
+    }
+
+    if (entry.isNull()) {
+      LOG_ERR(LOG_TAG, "Skipping invalid manifest file entry");
+      continue;
+    }
+
+    std::string destPath = entry["path"] | std::string("");
+    if (destPath.empty() && syncFiles.empty()) {
+      destPath = DEFAULT_DEST_PATH;
+    }
+
+    if (!isSafeSdPath(destPath)) {
+      LOG_ERR(LOG_TAG, "Skipping unsafe manifest path: %s", destPath.c_str());
+      continue;
+    }
+
+    std::string fileUrl = entry["url"] | "";
+    if (fileUrl.empty()) {
+      const auto slash = destPath.find_last_of('/');
+      fileUrl = slash == std::string::npos ? destPath : destPath.substr(slash + 1);
+    }
+    fileUrl = joinUrl(serverUrl, fileUrl);
+
+    if (!entry["sha256"].isNull()) {
+      LOG_INF(LOG_TAG, "sha256 present but validation is not implemented yet");
+    }
+
+    syncFiles.push_back({fileUrl, destPath});
+  }
+
+  if (syncFiles.empty()) {
+    LOG_ERR(LOG_TAG, "Manifest has no usable files");
     return false;
   }
 
-  destPath = first["path"] | DEFAULT_DEST_PATH;
-  if (!isSafeSdPath(destPath)) {
-    LOG_ERR(LOG_TAG, "Unsafe manifest path, using %s", DEFAULT_DEST_PATH);
-    destPath = DEFAULT_DEST_PATH;
-  }
-
-  fileUrl = first["url"] | "";
-  if (fileUrl.empty()) {
-    const auto slash = destPath.find_last_of('/');
-    fileUrl = slash == std::string::npos ? destPath : destPath.substr(slash + 1);
-  }
-  fileUrl = joinUrl(serverUrl, fileUrl);
-
-  if (!first["sha256"].isNull()) {
-    LOG_INF(LOG_TAG, "sha256 present but validation is not implemented yet");
-  }
+  LOG_INF(LOG_TAG, "Manifest has %zu file(s)", syncFiles.size());
   return true;
 }
 
@@ -215,7 +242,10 @@ bool promoteDownloadedFile(const std::string& tempPath, const std::string& destP
   return false;
 }
 
-bool downloadFirstFile(const std::string& fileUrl, const std::string& destPath) {
+bool downloadFile(const SyncFile& syncFile) {
+  const std::string& fileUrl = syncFile.url;
+  const std::string& destPath = syncFile.destPath;
+
   if (!ensureParentDir(destPath)) {
     LOG_ERR(LOG_TAG, "Failed to create destination directory");
     return false;
@@ -238,6 +268,16 @@ bool downloadFirstFile(const std::string& fileUrl, const std::string& destPath) 
 
   LOG_INF(LOG_TAG, "Saved %s", destPath.c_str());
   return true;
+}
+
+bool downloadFiles(const std::vector<SyncFile>& syncFiles) {
+  bool allOk = true;
+  for (const auto& syncFile : syncFiles) {
+    if (!downloadFile(syncFile)) {
+      allOk = false;
+    }
+  }
+  return allOk;
 }
 
 void disconnectWifi() {
@@ -269,11 +309,10 @@ StartupSync::Result StartupSync::runOnce() {
   do {
     if (!connectSavedWifi()) break;
 
-    std::string fileUrl;
-    std::string destPath;
-    if (!readManifest(serverUrl, fileUrl, destPath)) break;
+    std::vector<SyncFile> syncFiles;
+    if (!readManifest(serverUrl, syncFiles)) break;
 
-    ok = downloadFirstFile(fileUrl, destPath);
+    ok = downloadFiles(syncFiles);
   } while (false);
 
   disconnectWifi();

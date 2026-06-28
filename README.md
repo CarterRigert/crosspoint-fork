@@ -7,11 +7,19 @@ On startup or wake, CrossPoint now:
 - skips sync when `startupSyncServerUrl` is blank
 - connects to the last saved Wi-Fi network
 - fetches `{startupSyncServerUrl}/manifest.json`
-- downloads the first file listed in the manifest
+- downloads up to eight files listed in the manifest
 - writes it to a temporary SD-card file first, then promotes it to the final path
 - logs `Sync skipped`, `Sync OK`, or `Sync failed`
 
-The MVP intentionally does not generate todo dashboards, Hacker News EPUBs, or other content. The X4 only pulls finished files from your local server.
+The X4 only pulls finished files from your local server. The native macOS helper in `mac/X4SyncServer` can generate and serve `/sleep.bmp` and `/HNLatest.epub`.
+
+## Ready-Built Downloads
+
+If you only want to install and run this fork, use the files in `dist/`:
+
+- `dist/firmware.bin` - flash this to the X4 with the CrossPoint web flasher's `Custom .bin` option.
+- `dist/X4SyncServer.app.zip` - unzip this on macOS and run `X4SyncServer.app`.
+- `dist/SHA256SUMS` - optional checksums for confirming the downloaded files.
 
 ## Build and Flash This Fork
 
@@ -73,6 +81,45 @@ curl -X POST "http://X4_IP_ADDRESS/api/settings" \
 
 Use your computer's LAN IP address. `localhost` will not work from the X4 because it points to the X4 itself.
 
+## Mac Sync Server App
+
+The native macOS helper app lives in:
+
+```text
+mac/X4SyncServer
+```
+
+Run it from source:
+
+```bash
+cd mac/X4SyncServer
+swift run X4SyncServer
+```
+
+The app shows the server URL to enter on the X4, starts/stops the local HTTP server, generates `sleep.bmp`, and can poll Hacker News into `HNLatest.epub`.
+
+The app serves a manifest shaped like:
+
+```json
+{
+  "updated": "2026-06-28T00:00:00-07:00",
+  "files": [
+    {
+      "path": "/sleep.bmp",
+      "url": "http://192.168.1.50:8080/sleep.bmp",
+      "sha256": ""
+    },
+    {
+      "path": "/HNLatest.epub",
+      "url": "http://192.168.1.50:8080/HNLatest.epub",
+      "sha256": ""
+    }
+  ]
+}
+```
+
+Sleep-screen inputs are plain text files under `~/Library/Application Support/X4SyncServer/SleepInputs/`. Add an executable `build_sleep_inputs.sh` there to let Shortcuts, shell scripts, or Codex generate todo/calendar/weather inputs before the app renders the 480 x 800 BMP.
+
 ## Test With a Local Server
 
 On your computer:
@@ -115,7 +162,7 @@ Expected log lines include `Sync skipped`, `Sync OK`, or `Sync failed`. If the s
 
 ## MVP Limits
 
-- Only the first manifest file is downloaded.
+- Up to eight manifest files are downloaded per startup/wake.
 - `sha256` is logged as a TODO and not validated yet.
 - Sync runs once at startup/wake; there is no polling loop.
 - HTTP operations use short 5-second timeouts, and Wi-Fi connect waits up to 8 seconds in a background task.
