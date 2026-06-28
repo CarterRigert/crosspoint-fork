@@ -74,9 +74,10 @@ workflows.
 The Mac app has per-section sleep-screen toggles for Weather, Calendar, Todo,
 Notes, and HN. Preserve those toggles when changing layout behavior.
 
-When HN polling is enabled, the Mac app refreshes `hn.txt` with the top three HN
-stories after each HN fetch. Each story uses two lines: title, then
-points/comment count. Preserve that format unless the user asks otherwise.
+When HN polling is enabled, the Mac app refreshes `hn.txt` with the
+user-selected HN sleep story count, from 1 to 10. Each story uses two lines:
+title, then points/comment count. Preserve that format unless the user asks
+otherwise.
 
 Only edit `SleepRenderer.swift` when the visual layout, typography, sections, or
 BMP rendering behavior needs to change. The output must remain a 480 x 800 BMP

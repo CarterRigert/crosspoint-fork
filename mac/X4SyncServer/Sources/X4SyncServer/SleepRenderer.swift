@@ -177,7 +177,17 @@ enum SleepRenderer {
       specs.append(SleepSectionSpec(title: "Notes", lines: content.notes, maxLines: 4, lineHeight: 25, weight: 1.0))
     }
     if sections.hn {
-      specs.append(SleepSectionSpec(title: "HN Top 3", lines: content.hn, maxLines: 3, lineHeight: 62, weight: 4.2, style: .hackerNews))
+      let storyCount = max(1, min(10, hackerNewsStories(from: content.hn).count))
+      specs.append(
+        SleepSectionSpec(
+          title: "HN Top \(storyCount)",
+          lines: content.hn,
+          maxLines: storyCount,
+          lineHeight: 45,
+          weight: max(4.2, CGFloat(storyCount) * 1.7),
+          style: .hackerNews
+        )
+      )
     }
     return specs
   }
@@ -276,9 +286,9 @@ enum SleepRenderer {
 
     for (index, story) in stories.prefix(maxStories).enumerated() {
       let storyTop = top + 30 + CGFloat(index) * storyHeight
-      drawFittingText(story.title, x: x, top: storyTop, width: width, pageHeight: pageHeight, fontSize: 18, minimumFontSize: 10, weight: .regular)
+      drawFittingText(story.title, x: x, top: storyTop, width: width, pageHeight: pageHeight, fontSize: 15, minimumFontSize: 8, weight: .regular)
       if !story.stats.isEmpty {
-        drawText(story.stats, x: x, top: storyTop + 24, width: width, pageHeight: pageHeight, fontSize: 13, weight: .regular, color: .darkGray)
+        drawText(story.stats, x: x, top: storyTop + 18, width: width, pageHeight: pageHeight, fontSize: 11, weight: .regular, color: .darkGray)
       }
     }
   }
@@ -338,7 +348,7 @@ enum SleepRenderer {
   private static func hackerNewsStories(from lines: [String]) -> [HackerNewsSleepStory] {
     var stories: [HackerNewsSleepStory] = []
     var index = 0
-    while index < lines.count && stories.count < 3 {
+    while index < lines.count && stories.count < 10 {
       let title = lines[index]
       let stats = index + 1 < lines.count ? lines[index + 1] : ""
       stories.append(HackerNewsSleepStory(title: title, stats: stats))

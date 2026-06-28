@@ -116,6 +116,14 @@ struct ContentView: View {
       }
 
       GridRow {
+        Text("HN on sleep")
+        Stepper(value: $model.sleepHNStoryCount, in: 1...10) {
+          Text("\(model.sleepHNStoryCount) stor\(model.sleepHNStoryCount == 1 ? "y" : "ies")")
+        }
+        .disabled(!model.sleepEnabled || !model.sleepHNEnabled || model.isBusy)
+      }
+
+      GridRow {
         Toggle("Sleep refresh timer", isOn: $model.sleepRegenerateTimerEnabled)
         Stepper(value: $model.sleepRegenerateIntervalMinutes, in: 5...240, step: 5) {
           Text("Every \(model.sleepRegenerateIntervalMinutes) min")
@@ -146,6 +154,7 @@ struct ContentView: View {
     .onChange(of: model.sleepTodoEnabled) { _, _ in model.sleepSectionSettingsChanged() }
     .onChange(of: model.sleepNotesEnabled) { _, _ in model.sleepSectionSettingsChanged() }
     .onChange(of: model.sleepHNEnabled) { _, _ in model.sleepSectionSettingsChanged() }
+    .onChange(of: model.sleepHNStoryCount) { _, _ in model.sleepHNStoryCountChanged() }
     .onChange(of: model.sleepRegenerateTimerEnabled) { _, _ in model.sleepTimerSettingsChanged() }
     .onChange(of: model.sleepRegenerateIntervalMinutes) { _, _ in model.sleepTimerSettingsChanged() }
     .onChange(of: model.hnEnabled) { _, _ in model.settingsChanged() }

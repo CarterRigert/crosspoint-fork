@@ -15,6 +15,7 @@ final class AppModel: ObservableObject {
   @Published var sleepTodoEnabled: Bool
   @Published var sleepNotesEnabled: Bool
   @Published var sleepHNEnabled: Bool
+  @Published var sleepHNStoryCount: Int
   @Published var sleepRegenerateTimerEnabled: Bool
   @Published var sleepRegenerateIntervalMinutes: Int
   @Published var hnEnabled: Bool
@@ -97,6 +98,8 @@ final class AppModel: ObservableObject {
     sleepTodoEnabled = defaults.object(forKey: "sleepTodoEnabled") as? Bool ?? true
     sleepNotesEnabled = defaults.object(forKey: "sleepNotesEnabled") as? Bool ?? true
     sleepHNEnabled = defaults.object(forKey: "sleepHNEnabled") as? Bool ?? true
+    let storedSleepHNStoryCount = defaults.integer(forKey: "sleepHNStoryCount")
+    sleepHNStoryCount = storedSleepHNStoryCount == 0 ? 3 : Self.clampedHNStoryCount(storedSleepHNStoryCount)
     sleepRegenerateTimerEnabled = defaults.object(forKey: "sleepRegenerateTimerEnabled") as? Bool ?? false
     let storedSleepInterval = defaults.integer(forKey: "sleepRegenerateIntervalMinutes")
     sleepRegenerateIntervalMinutes = storedSleepInterval == 0 ? 15 : storedSleepInterval
@@ -221,6 +224,20 @@ final class AppModel: ObservableObject {
       return
     }
     regenerateSleepScreen()
+  }
+
+  func sleepHNStoryCountChanged() {
+    sleepHNStoryCount = Self.clampedHNStoryCount(sleepHNStoryCount)
+    saveSleepSectionSettings()
+    guard sleepEnabled && sleepHNEnabled else {
+      statusMessage = "HN sleep count saved."
+      return
+    }
+    if hnEnabled {
+      updateHNNow()
+    } else {
+      regenerateSleepScreen()
+    }
   }
 
   func regenerateSleepScreen() {
@@ -459,10 +476,12 @@ final class AppModel: ObservableObject {
     defaults.set(sleepTodoEnabled, forKey: "sleepTodoEnabled")
     defaults.set(sleepNotesEnabled, forKey: "sleepNotesEnabled")
     defaults.set(sleepHNEnabled, forKey: "sleepHNEnabled")
+    defaults.set(Self.clampedHNStoryCount(sleepHNStoryCount), forKey: "sleepHNStoryCount")
   }
 
   private func writeSleepHNPreview(stories: [HNStory]) throws {
-    let lines = stories.prefix(3).enumerated().flatMap { index, story in
+    let storyCount = Self.clampedHNStoryCount(sleepHNStoryCount)
+    let lines = stories.prefix(storyCount).enumerated().flatMap { index, story in
       let points = story.score ?? 0
       let comments = story.commentCount ?? 0
       return [
@@ -472,6 +491,10 @@ final class AppModel: ObservableObject {
     }
     let text = lines.isEmpty ? "HN has no stories right now\n" : lines.joined(separator: "\n") + "\n"
     try text.write(to: sleepHNInputURL, atomically: true, encoding: .utf8)
+  }
+
+  private static func clampedHNStoryCount(_ value: Int) -> Int {
+    max(1, min(10, value))
   }
 
   private func manifestEntries() -> [ManifestEntry] {
