@@ -6,6 +6,7 @@ struct HNStory: Sendable {
   let url: String?
   let by: String?
   let score: Int?
+  let commentCount: Int?
   let comments: [HNComment]
 }
 
@@ -25,6 +26,7 @@ final class HNClient: @unchecked Sendable {
     let title: String?
     let url: String?
     let score: Int?
+    let descendants: Int?
     let kids: [Int]?
     let dead: Bool?
     let deleted: Bool?
@@ -61,6 +63,7 @@ final class HNClient: @unchecked Sendable {
           url: item.url,
           by: item.by,
           score: item.score,
+          commentCount: item.descendants,
           comments: comments
         )
       )

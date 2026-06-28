@@ -66,12 +66,12 @@ enum EpubBuilder {
 
   private static func navXHTML(stories: [HNStory], lastUpdated: String) -> String {
     let items = stories.enumerated().map { index, story in
-      let points = story.score.map { "\($0) points" } ?? "no points"
+      let meta = [pointsText(story.score), commentsText(story.commentCount)].joined(separator: " · ")
       return """
           <li>
             <a href="story-\(index + 1).xhtml">
               <span class="story-title">\(xml(story.title))</span>
-              <span class="points">\(xml(points))</span>
+              <span class="story-meta"> - \(xml(meta))</span>
             </a>
           </li>
       """
@@ -93,7 +93,8 @@ enum EpubBuilder {
   private static func storyXHTML(_ story: HNStory, index: Int) -> String {
     let meta = [
       story.by.map { "by \($0)" },
-      story.score.map { "\($0) points" }
+      pointsText(story.score),
+      commentsText(story.commentCount)
     ].compactMap { $0 }.joined(separator: " · ")
 
     let link = story.url.map { "<p><a href=\"\(xml($0))\">\(xml($0))</a></p>" } ?? ""
@@ -141,11 +142,11 @@ enum EpubBuilder {
         h1 { font-size: 1.6em; }
         h2 { font-size: 1.2em; margin-top: 1.4em; }
         .meta { color: #555; font-size: 0.9em; }
-        .front-list { margin: 0.4em 0 0; padding-left: 1.35em; }
-        .front-list li { margin: 0 0 0.45em; padding-left: 0.1em; }
+        .front-list { margin: 0.25em 0 0; padding-left: 1.25em; }
+        .front-list li { font-size: 0.78em; line-height: 1.12; margin: 0 0 0.2em; padding-left: 0.05em; }
         .front-list a { color: inherit; text-decoration: none; }
-        .story-title { display: block; font-size: 0.96em; }
-        .points { color: #555; display: block; font-size: 0.78em; margin-top: 0.05em; }
+        .story-title { font-weight: 600; }
+        .story-meta { color: #555; font-size: 0.88em; }
         .comment { border-top: 1px solid #ddd; margin-top: 1em; padding-top: 0.6em; }
         blockquote { border-left: 3px solid #ddd; margin-left: 0.5em; padding-left: 0.8em; }
       </style>
@@ -161,6 +162,16 @@ enum EpubBuilder {
     text.components(separatedBy: "\n\n")
       .map { xml($0).replacingOccurrences(of: "\n", with: "<br/>") }
       .joined(separator: "</p><p>")
+  }
+
+  private static func pointsText(_ points: Int?) -> String {
+    guard let points else { return "0 points" }
+    return "\(points) point\(points == 1 ? "" : "s")"
+  }
+
+  private static func commentsText(_ comments: Int?) -> String {
+    guard let comments else { return "0 comments" }
+    return "\(comments) comment\(comments == 1 ? "" : "s")"
   }
 
   private static func xml(_ value: String) -> String {

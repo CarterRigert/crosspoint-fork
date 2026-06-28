@@ -1,9 +1,11 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 @MainActor
 final class AppModel: ObservableObject {
-  @Published var serverEnabled: Bool = false
+  @Published var serverEnabled: Bool
+  @Published var launchAtLoginEnabled: Bool
   @Published var sleepEnabled: Bool
   @Published var sleepOrientation: SleepTextOrientation
   @Published var hnEnabled: Bool
@@ -15,6 +17,7 @@ final class AppModel: ObservableObject {
   @Published var manifestStatus: String = "Not written"
   @Published var sleepStatus: String = "Not generated"
   @Published var hnStatus: String = "Not generated"
+  @Published var lastRequestStatus: String = "No requests yet"
 
   let port: UInt16 = 8080
 
@@ -50,6 +53,8 @@ final class AppModel: ObservableObject {
   }
 
   init() {
+    serverEnabled = defaults.object(forKey: "serverEnabled") as? Bool ?? false
+    launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     sleepEnabled = defaults.object(forKey: "sleepEnabled") as? Bool ?? true
     let storedOrientation = defaults.string(forKey: "sleepOrientation").flatMap(SleepTextOrientation.init(rawValue:))
     sleepOrientation = storedOrientation ?? .upsideDown
@@ -68,7 +73,11 @@ final class AppModel: ObservableObject {
       try refreshGeneratedFilesIfNeeded()
       try refreshManifest()
       scheduleHNTimer()
-      statusMessage = "Ready. Set the X4 Startup Sync URL to \(serverURL)."
+      if serverEnabled {
+        startServer()
+      } else {
+        statusMessage = "Ready. Set the X4 Startup Sync URL to \(serverURL)."
+      }
       if hnEnabled && !fileManager.fileExists(atPath: hnEPUBURL.path) {
         updateHNNow()
       }
@@ -78,10 +87,27 @@ final class AppModel: ObservableObject {
   }
 
   func setServerEnabled(_ enabled: Bool) {
+    defaults.set(enabled, forKey: "serverEnabled")
     if enabled {
       startServer()
     } else {
       stopServer()
+    }
+  }
+
+  func setLaunchAtLoginEnabled(_ enabled: Bool) {
+    do {
+      if enabled {
+        try SMAppService.mainApp.register()
+      } else {
+        try SMAppService.mainApp.unregister()
+      }
+      launchAtLoginEnabled = enabled
+      statusMessage = enabled ? "App will launch at login." : "Launch at login disabled."
+      lastError = nil
+    } catch {
+      launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+      showError(error)
     }
   }
 
@@ -139,7 +165,7 @@ final class AppModel: ObservableObject {
 
   func updateHNNow() {
     runBusyTask("Fetching Hacker News...") {
-      let stories = try await HNClient().frontPageStories(limit: 12, commentsPerStory: 4)
+      let stories = try await HNClient().frontPageStories(limit: 30, commentsPerStory: 4)
       try EpubBuilder.buildHNLatest(stories: stories, outputURL: self.hnEPUBURL)
       try self.refreshManifest()
       await MainActor.run {
@@ -169,13 +195,20 @@ final class AppModel: ObservableObject {
       updateServerURL()
       try refreshManifest()
       let nextServer = StaticHTTPServer(rootDirectory: publicDir, port: port)
+      nextServer.onRequest = { [weak self] request in
+        Task { @MainActor in
+          self?.recordRequest(request)
+        }
+      }
       try nextServer.start()
       server = nextServer
       serverEnabled = true
+      defaults.set(true, forKey: "serverEnabled")
       statusMessage = "Server running at \(serverURL)."
       lastError = nil
     } catch {
       serverEnabled = false
+      defaults.set(false, forKey: "serverEnabled")
       showError(error)
     }
   }
@@ -184,7 +217,13 @@ final class AppModel: ObservableObject {
     server?.stop()
     server = nil
     serverEnabled = false
+    defaults.set(false, forKey: "serverEnabled")
     statusMessage = "Server stopped."
+  }
+
+  private func recordRequest(_ request: HTTPRequestLog) {
+    let time = DateFormatter.localizedString(from: request.timestamp, dateStyle: .none, timeStyle: .medium)
+    lastRequestStatus = "\(time) \(request.method) \(request.path) -> \(request.status)"
   }
 
   private func prepareFolders() throws {

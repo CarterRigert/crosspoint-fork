@@ -14,6 +14,18 @@ The app shows the exact URL to enter on the X4:
 Settings -> System -> Startup Sync URL
 ```
 
+Keep the Server toggle on while the X4 starts or wakes. If you want this to survive a Mac reboot, enable `Launch at login` too; otherwise macOS will not open the app automatically after login.
+
+The Output section includes `Last Request`. When the X4 syncs, it should show requests such as:
+
+```text
+GET /manifest.json -> 200 OK
+GET /sleep.bmp -> 200 OK
+GET /HNLatest.epub -> 200 OK
+```
+
+If `Last Request` does not change after restarting or waking the X4, the device is not reaching the Mac server URL.
+
 ## Run From Source
 
 ```bash
@@ -54,6 +66,6 @@ The app runs it before rendering `sleep.bmp`. This gives Shortcuts, cron, shell 
 
 ## HN EPUB
 
-When enabled, the app fetches the Hacker News front page using the public Firebase API, captures a bounded set of top comments, and writes `HNLatest.epub`.
+When enabled, the app fetches the top 30 Hacker News front-page stories using the public Firebase API, captures a bounded set of top comments, and writes `HNLatest.epub`. The first EPUB page is a condensed list with title, points, and comment count.
 
 The polling interval is adjustable in the app. The X4 only pulls the latest finished EPUB when it wakes or starts; it does not poll Hacker News directly.

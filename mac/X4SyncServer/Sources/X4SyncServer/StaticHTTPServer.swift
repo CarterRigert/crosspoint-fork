@@ -1,6 +1,13 @@
 import Foundation
 import Network
 
+struct HTTPRequestLog: Sendable {
+  let method: String
+  let path: String
+  let status: String
+  let timestamp: Date
+}
+
 final class StaticHTTPServer: @unchecked Sendable {
   enum ServerError: LocalizedError {
     case invalidPort
@@ -17,6 +24,7 @@ final class StaticHTTPServer: @unchecked Sendable {
   private let port: UInt16
   private let queue = DispatchQueue(label: "X4SyncServer.HTTPServer")
   private var listener: NWListener?
+  var onRequest: (@Sendable (HTTPRequestLog) -> Void)?
 
   init(rootDirectory: URL, port: UInt16) {
     self.rootDirectory = rootDirectory
@@ -51,38 +59,61 @@ final class StaticHTTPServer: @unchecked Sendable {
       }
 
       let response = self.response(for: data ?? Data())
-      connection.send(content: response, completion: .contentProcessed { _ in
+      self.onRequest?(
+        HTTPRequestLog(
+          method: response.method,
+          path: response.path,
+          status: response.status,
+          timestamp: Date()
+        )
+      )
+      connection.send(content: response.data, completion: .contentProcessed { _ in
         connection.cancel()
       })
     }
   }
 
-  private func response(for data: Data) -> Data {
+  private struct HTTPResponse {
+    let method: String
+    let path: String
+    let status: String
+    let data: Data
+  }
+
+  private func response(for data: Data) -> HTTPResponse {
     guard let request = String(data: data, encoding: .utf8),
           let firstLine = request.split(separator: "\r\n").first
     else {
-      return httpResponse(status: "400 Bad Request", contentType: "text/plain", body: Data("Bad request".utf8))
+      let status = "400 Bad Request"
+      return HTTPResponse(method: "?", path: "?", status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Bad request".utf8)))
     }
 
     let parts = firstLine.split(separator: " ")
     guard parts.count >= 2, parts[0] == "GET" else {
-      return httpResponse(status: "405 Method Not Allowed", contentType: "text/plain", body: Data("Only GET is supported".utf8))
+      let method = parts.first.map(String.init) ?? "?"
+      let path = parts.count >= 2 ? String(parts[1]) : "?"
+      let status = "405 Method Not Allowed"
+      return HTTPResponse(method: method, path: path, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Only GET is supported".utf8)))
     }
 
+    let method = String(parts[0])
     let rawPath = String(parts[1])
     let path = sanitize(rawPath)
     guard !path.isEmpty else {
-      return httpResponse(status: "403 Forbidden", contentType: "text/plain", body: Data("Forbidden".utf8))
+      let status = "403 Forbidden"
+      return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Forbidden".utf8)))
     }
 
     let fileURL = rootDirectory.appendingPathComponent(path, isDirectory: false)
     guard fileURL.path.hasPrefix(rootDirectory.path),
           let fileData = try? Data(contentsOf: fileURL)
     else {
-      return httpResponse(status: "404 Not Found", contentType: "text/plain", body: Data("Not found".utf8))
+      let status = "404 Not Found"
+      return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Not found".utf8)))
     }
 
-    return httpResponse(status: "200 OK", contentType: contentType(for: fileURL), body: fileData)
+    let status = "200 OK"
+    return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: contentType(for: fileURL), body: fileData))
   }
 
   private func sanitize(_ rawPath: String) -> String {

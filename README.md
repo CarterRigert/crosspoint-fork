@@ -98,6 +98,8 @@ swift run X4SyncServer
 
 The app shows the server URL to enter on the X4, starts/stops the local HTTP server, generates `sleep.bmp`, and can poll Hacker News into `HNLatest.epub`.
 
+The Server toggle is remembered across app launches. If you want the Mac to serve files after a Mac reboot, also enable `Launch at login`; otherwise the app must be opened manually after login. The app shows `Last Request`, which should update when the X4 requests `/manifest.json`, `/sleep.bmp`, or `/HNLatest.epub`.
+
 The app serves a manifest shaped like:
 
 ```json

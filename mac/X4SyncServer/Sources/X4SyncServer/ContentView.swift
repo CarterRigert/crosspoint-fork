@@ -63,6 +63,12 @@ struct ContentView: View {
       }
 
       GridRow {
+        Toggle("Launch at login", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLoginEnabled($0) }))
+        Text(model.launchAtLoginEnabled ? "Starts after Mac login" : "Manual launch")
+          .foregroundStyle(.secondary)
+      }
+
+      GridRow {
         Toggle("Sleep screen", isOn: $model.sleepEnabled)
         HStack {
           Button {
@@ -121,6 +127,8 @@ struct ContentView: View {
         statusItem("Sleep BMP", model.sleepStatus)
         statusItem("HN EPUB", model.hnStatus)
       }
+
+      statusItem("Last Request", model.lastRequestStatus)
     }
   }
 
