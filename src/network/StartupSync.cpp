@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,8 @@ constexpr char MANIFEST_NAME[] = "manifest.json";
 constexpr char MANIFEST_TMP[] = "/.crosspoint/startup_sync_manifest.tmp";
 constexpr char DEFAULT_DEST_PATH[] = "/Sync/test.txt";
 constexpr char SLEEP_IMAGE_PATH[] = "/sleep.bmp";
+constexpr char HN_LATEST_PATH[] = "/HNLatest.epub";
 constexpr int WIFI_CONNECT_TIMEOUT_MS = 8000;
-constexpr int SLEEP_WIFI_CONNECT_TIMEOUT_MS = 5000;
 constexpr int HTTP_TIMEOUT_MS = 5000;
 constexpr int SLEEP_SYNC_WAIT_TIMEOUT_MS = 60000;
 constexpr int CANCEL_WAIT_TIMEOUT_MS = 2000;
@@ -36,13 +37,14 @@ constexpr uint32_t TASK_STACK_SIZE = 8192;
 TaskHandle_t syncTaskHandle = nullptr;
 volatile bool cancelRequested = false;
 
-enum class SleepSyncState : uint8_t {
+enum class FileSyncState : uint8_t {
   Idle,
   Pending,
   Resolved,
 };
 
-volatile SleepSyncState sleepSyncState = SleepSyncState::Idle;
+volatile FileSyncState sleepSyncState = FileSyncState::Idle;
+volatile FileSyncState hnLatestSyncState = FileSyncState::Idle;
 
 struct SyncFile {
   std::string url;
@@ -93,7 +95,13 @@ std::string manifestUrlFor(const std::string& baseUrl) { return joinUrl(baseUrl,
 
 bool isSleepImage(const SyncFile& syncFile) { return syncFile.destPath == SLEEP_IMAGE_PATH; }
 
+bool isHnLatest(const SyncFile& syncFile) { return syncFile.destPath == HN_LATEST_PATH; }
+
 bool hasVersionInfo(const SyncFile& syncFile) { return !syncFile.sha256.empty() || syncFile.size > 0; }
+
+uint64_t sortSize(const SyncFile& syncFile) {
+  return syncFile.size > 0 ? syncFile.size : std::numeric_limits<uint64_t>::max();
+}
 
 bool isSafeSdPath(const std::string& path) {
   return path.size() > 1 && path.size() < 220 && path.front() == '/' && path.find("..") == std::string::npos &&
@@ -482,12 +490,15 @@ enum class SyncMode {
 };
 
 bool downloadFiles(std::vector<SyncFile>& syncFiles, SyncMode mode, volatile bool* cancelFlag, const int timeoutMs) {
-  std::stable_sort(syncFiles.begin(), syncFiles.end(), [](const SyncFile& a, const SyncFile& b) {
-    return isSleepImage(a) && !isSleepImage(b);
-  });
+  if (mode == SyncMode::AllFiles) {
+    std::stable_sort(syncFiles.begin(), syncFiles.end(), [](const SyncFile& a, const SyncFile& b) {
+      return sortSize(a) < sortSize(b);
+    });
+  }
 
   bool allOk = true;
   bool sawSleepImage = false;
+  bool sawHnLatest = false;
   for (const auto& syncFile : syncFiles) {
     if (cancelFlag && *cancelFlag) {
       allOk = false;
@@ -500,7 +511,12 @@ bool downloadFiles(std::vector<SyncFile>& syncFiles, SyncMode mode, volatile boo
 
     if (isSleepImage(syncFile)) {
       sawSleepImage = true;
-      sleepSyncState = SleepSyncState::Pending;
+      sleepSyncState = FileSyncState::Pending;
+    }
+
+    if (mode == SyncMode::AllFiles && isHnLatest(syncFile)) {
+      sawHnLatest = true;
+      hnLatestSyncState = FileSyncState::Pending;
     }
 
     if (!downloadFile(syncFile, cancelFlag, timeoutMs)) {
@@ -508,12 +524,20 @@ bool downloadFiles(std::vector<SyncFile>& syncFiles, SyncMode mode, volatile boo
     }
 
     if (isSleepImage(syncFile)) {
-      sleepSyncState = SleepSyncState::Resolved;
+      sleepSyncState = FileSyncState::Resolved;
+    }
+
+    if (mode == SyncMode::AllFiles && isHnLatest(syncFile)) {
+      hnLatestSyncState = FileSyncState::Resolved;
     }
   }
 
   if (!sawSleepImage) {
-    sleepSyncState = SleepSyncState::Resolved;
+    sleepSyncState = FileSyncState::Resolved;
+  }
+
+  if (mode == SyncMode::AllFiles && !sawHnLatest) {
+    hnLatestSyncState = FileSyncState::Resolved;
   }
 
   return allOk;
@@ -532,6 +556,10 @@ StartupSync::Result runSync(SyncMode mode, const int wifiTimeoutMs, const int ht
   const std::string serverUrl = withoutTrailingSlashes(trim(SETTINGS.startupSyncServerUrl));
   if (serverUrl.empty()) {
     LOG_INF(LOG_TAG, "Sync skipped");
+    sleepSyncState = FileSyncState::Resolved;
+    if (mode == SyncMode::AllFiles) {
+      hnLatestSyncState = FileSyncState::Resolved;
+    }
     return StartupSync::Result::Skipped;
   }
 
@@ -552,7 +580,10 @@ StartupSync::Result runSync(SyncMode mode, const int wifiTimeoutMs, const int ht
   disconnectWifi();
 
   if (!ok) {
-    sleepSyncState = SleepSyncState::Resolved;
+    sleepSyncState = FileSyncState::Resolved;
+    if (mode == SyncMode::AllFiles) {
+      hnLatestSyncState = FileSyncState::Resolved;
+    }
     LOG_ERR(LOG_TAG, "Sync failed");
     return StartupSync::Result::Failed;
   }
@@ -564,7 +595,8 @@ StartupSync::Result runSync(SyncMode mode, const int wifiTimeoutMs, const int ht
 void syncTask(void*) {
   StartupSync::runOnce();
   cancelRequested = false;
-  sleepSyncState = SleepSyncState::Resolved;
+  sleepSyncState = FileSyncState::Resolved;
+  hnLatestSyncState = FileSyncState::Resolved;
   syncTaskHandle = nullptr;
   vTaskDelete(nullptr);
 }
@@ -572,48 +604,53 @@ void syncTask(void*) {
 
 StartupSync::Result StartupSync::runOnce() {
   cancelRequested = false;
-  sleepSyncState = SleepSyncState::Idle;
+  sleepSyncState = FileSyncState::Idle;
+  hnLatestSyncState = FileSyncState::Pending;
   return runSync(SyncMode::AllFiles, WIFI_CONNECT_TIMEOUT_MS, HTTP_TIMEOUT_MS, &cancelRequested);
 }
 
 StartupSync::Result StartupSync::syncSleepImageBeforeSleep() {
-  if (trim(SETTINGS.startupSyncServerUrl).empty()) {
-    LOG_INF(LOG_TAG, "Sleep sync skipped");
+  if (!syncTaskHandle) {
+    LOG_INF(LOG_TAG, "Sleep sync skipped: no startup sync running");
     return Result::Skipped;
   }
 
-  if (syncTaskHandle) {
-    LOG_INF(LOG_TAG, "Waiting for startup sync sleep image before sleep");
-    const unsigned long waitStart = millis();
-    while (syncTaskHandle && sleepSyncState != SleepSyncState::Resolved &&
-           millis() - waitStart < SLEEP_SYNC_WAIT_TIMEOUT_MS) {
-      delay(50);
-    }
-
-    cancelRequested = true;
-    const unsigned long cancelStart = millis();
-    while (syncTaskHandle && millis() - cancelStart < CANCEL_WAIT_TIMEOUT_MS) {
-      delay(25);
-    }
-
-    if (sleepSyncState == SleepSyncState::Resolved) {
-      LOG_INF(LOG_TAG, "Sleep image resolved before sleep");
-      return Result::Ok;
-    }
-
-    LOG_ERR(LOG_TAG, "Sleep image sync timed out before sleep");
-    return Result::Failed;
+  if (sleepSyncState == FileSyncState::Resolved) {
+    LOG_INF(LOG_TAG, "Sleep sync skipped: sleep image already resolved");
+    return Result::Skipped;
   }
 
-  volatile bool sleepCancelRequested = false;
-  sleepSyncState = SleepSyncState::Pending;
-  const Result result = runSync(SyncMode::SleepImageOnly, SLEEP_WIFI_CONNECT_TIMEOUT_MS, HTTP_TIMEOUT_MS,
-                                &sleepCancelRequested);
-  sleepSyncState = SleepSyncState::Resolved;
-  return result;
+  LOG_INF(LOG_TAG, "Waiting for startup sync sleep image before sleep");
+  const unsigned long waitStart = millis();
+  while (syncTaskHandle && sleepSyncState != FileSyncState::Resolved &&
+         millis() - waitStart < SLEEP_SYNC_WAIT_TIMEOUT_MS) {
+    delay(50);
+  }
+
+  cancelRequested = true;
+  const unsigned long cancelStart = millis();
+  while (syncTaskHandle && millis() - cancelStart < CANCEL_WAIT_TIMEOUT_MS) {
+    delay(25);
+  }
+
+  if (sleepSyncState == FileSyncState::Resolved) {
+    LOG_INF(LOG_TAG, "Sleep image resolved before sleep");
+    return Result::Ok;
+  }
+
+  LOG_ERR(LOG_TAG, "Sleep image sync timed out before sleep");
+  return Result::Failed;
 }
 
 bool StartupSync::isRunning() { return syncTaskHandle != nullptr; }
+
+bool StartupSync::isSleepImageUpdating() {
+  return syncTaskHandle != nullptr && sleepSyncState != FileSyncState::Resolved;
+}
+
+bool StartupSync::isHnLatestUpdating() {
+  return syncTaskHandle != nullptr && hnLatestSyncState != FileSyncState::Resolved;
+}
 
 void StartupSync::start() {
   if (trim(SETTINGS.startupSyncServerUrl).empty()) {

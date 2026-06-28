@@ -12,5 +12,7 @@ void start();
 Result runOnce();
 Result syncSleepImageBeforeSleep();
 bool isRunning();
+bool isSleepImageUpdating();
+bool isHnLatestUpdating();
 
 }  // namespace StartupSync

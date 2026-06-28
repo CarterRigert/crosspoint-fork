@@ -142,7 +142,7 @@ bool shouldDeferStartupSyncedReaderResume() {
 }
 
 bool shouldSyncSleepImageBeforeSleep(bool isQuickResumeSleep) {
-  if (isQuickResumeSleep || SETTINGS.startupSyncServerUrl[0] == '\0') {
+  if (isQuickResumeSleep || !StartupSync::isSleepImageUpdating()) {
     return false;
   }
 

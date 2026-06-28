@@ -200,9 +200,14 @@ enum SleepRenderer {
   }
 
   private static func makeBMP(from rep: NSBitmapImageRep, orientation: SleepTextOrientation) -> Data {
-    let rowBytes = ((width * 3 + 3) / 4) * 4
+    let bitsPerPixel = 2
+    let paletteBytes = 4 * 4
+    let pixelOffset = 14 + 40 + paletteBytes
+    let rowBytes = ((width * bitsPerPixel + 31) / 32) * 4
+    let rowPixelBytes = (width * bitsPerPixel + 7) / 8
+    let rowPadding = rowBytes - rowPixelBytes
     let pixelBytes = rowBytes * height
-    let fileSize = 14 + 40 + pixelBytes
+    let fileSize = pixelOffset + pixelBytes
 
     var data = Data()
     data.reserveCapacity(fileSize)
@@ -211,32 +216,48 @@ enum SleepRenderer {
     data.appendUInt32LE(UInt32(fileSize))
     data.appendUInt16LE(0)
     data.appendUInt16LE(0)
-    data.appendUInt32LE(54)
+    data.appendUInt32LE(UInt32(pixelOffset))
     data.appendUInt32LE(40)
     data.appendInt32LE(Int32(width))
     data.appendInt32LE(-Int32(height))
     data.appendUInt16LE(1)
-    data.appendUInt16LE(24)
+    data.appendUInt16LE(UInt16(bitsPerPixel))
     data.appendUInt32LE(0)
     data.appendUInt32LE(UInt32(pixelBytes))
     data.appendInt32LE(2835)
     data.appendInt32LE(2835)
-    data.appendUInt32LE(0)
-    data.appendUInt32LE(0)
+    data.appendUInt32LE(4)
+    data.appendUInt32LE(4)
 
-    let padding = [UInt8](repeating: 0, count: rowBytes - width * 3)
+    for level in [UInt8(0), UInt8(85), UInt8(170), UInt8(255)] {
+      data.append(level)
+      data.append(level)
+      data.append(level)
+      data.append(0)
+    }
+
     for y in 0..<height {
+      var currentByte: UInt8 = 0
       for x in 0..<width {
         let source = sourcePixel(forOutputX: x, outputY: y, sourceWidth: rep.pixelsWide, sourceHeight: rep.pixelsHigh, orientation: orientation)
         let color = rep.colorAt(x: source.x, y: source.y)?.usingColorSpace(.deviceRGB) ?? .white
-        let red = UInt8(max(0, min(255, Int(round(color.redComponent * 255)))))
-        let green = UInt8(max(0, min(255, Int(round(color.greenComponent * 255)))))
-        let blue = UInt8(max(0, min(255, Int(round(color.blueComponent * 255)))))
-        data.append(blue)
-        data.append(green)
-        data.append(red)
+        let red = max(0, min(255, Int(round(color.redComponent * 255))))
+        let green = max(0, min(255, Int(round(color.greenComponent * 255))))
+        let blue = max(0, min(255, Int(round(color.blueComponent * 255))))
+        let luminance = (77 * red + 150 * green + 29 * blue) >> 8
+        let level = UInt8(max(0, min(3, (luminance + 42) / 85)))
+        currentByte |= level << (6 - ((x & 3) * 2))
+        if (x & 3) == 3 {
+          data.append(currentByte)
+          currentByte = 0
+        }
       }
-      data.append(contentsOf: padding)
+      if (width & 3) != 0 {
+        data.append(currentByte)
+      }
+      for _ in 0..<rowPadding {
+        data.append(0)
+      }
     }
 
     return data

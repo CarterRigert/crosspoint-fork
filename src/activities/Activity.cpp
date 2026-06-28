@@ -15,8 +15,8 @@ void Activity::requestUpdateAndWait() { activityManager.requestUpdateAndWait(); 
 void Activity::onGoHome(HomeMenuItem item) { activityManager.goHome(item); }
 
 void Activity::onSelectBook(const std::string& path) {
-  if (path == "/HNLatest.epub" && StartupSync::isRunning()) {
-    LOG_INF("ACT", "Blocked HNLatest.epub open while startup sync is running");
+  if (path == "/HNLatest.epub" && StartupSync::isHnLatestUpdating()) {
+    LOG_INF("ACT", "Blocked HNLatest.epub open while HN sync is running");
     GUI.drawPopup(renderer, "HN updating. Try again.");
     return;
   }
