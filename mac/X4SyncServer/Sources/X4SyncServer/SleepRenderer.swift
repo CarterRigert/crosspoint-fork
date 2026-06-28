@@ -177,7 +177,7 @@ enum SleepRenderer {
       specs.append(SleepSectionSpec(title: "Notes", lines: content.notes, maxLines: 4, lineHeight: 25, weight: 1.0))
     }
     if sections.hn {
-      specs.append(SleepSectionSpec(title: "HN Top 3", lines: content.hn, maxLines: 3, lineHeight: 34, weight: 1.45))
+      specs.append(SleepSectionSpec(title: "HN Top 3", lines: content.hn, maxLines: 3, lineHeight: 62, weight: 4.2, style: .hackerNews))
     }
     return specs
   }
@@ -203,17 +203,30 @@ enum SleepRenderer {
 
     for spec in specs {
       let height = availableHeight * (spec.weight / totalWeight)
-      let maxLines = max(1, min(spec.maxLines, Int((height - 34) / spec.lineHeight)))
-      section(
-        spec.title,
-        lines: spec.lines,
-        x: x,
-        top: currentTop,
-        width: width,
-        pageHeight: pageHeight,
-        maxLines: maxLines,
-        lineHeight: spec.lineHeight
-      )
+      let visibleRows = max(1, min(spec.maxLines, Int((height - 34) / spec.lineHeight)))
+      if spec.style == .hackerNews {
+        hackerNewsSection(
+          spec.title,
+          lines: spec.lines,
+          x: x,
+          top: currentTop,
+          width: width,
+          pageHeight: pageHeight,
+          maxStories: visibleRows,
+          storyHeight: spec.lineHeight
+        )
+      } else {
+        section(
+          spec.title,
+          lines: spec.lines,
+          x: x,
+          top: currentTop,
+          width: width,
+          pageHeight: pageHeight,
+          maxLines: visibleRows,
+          lineHeight: spec.lineHeight
+        )
+      }
       currentTop += height + gap
     }
   }
@@ -239,6 +252,34 @@ enum SleepRenderer {
 
     for (index, line) in shown.enumerated() {
       drawText(line, x: x, top: top + 30 + CGFloat(index) * lineHeight, width: width, pageHeight: pageHeight, fontSize: 20, weight: .regular)
+    }
+  }
+
+  private static func hackerNewsSection(
+    _ title: String,
+    lines: [String],
+    x: CGFloat,
+    top: CGFloat,
+    width: CGFloat,
+    pageHeight: CGFloat,
+    maxStories: Int,
+    storyHeight: CGFloat
+  ) {
+    drawRule(x: x, top: top - 14, width: width, pageHeight: pageHeight)
+    drawText(title.uppercased(), x: x, top: top, width: width, pageHeight: pageHeight, fontSize: 13, weight: .semibold, color: .darkGray)
+
+    let stories = hackerNewsStories(from: lines)
+    if stories.isEmpty {
+      drawText("No items", x: x, top: top + 30, width: width, pageHeight: pageHeight, fontSize: 18, weight: .regular, color: .gray)
+      return
+    }
+
+    for (index, story) in stories.prefix(maxStories).enumerated() {
+      let storyTop = top + 30 + CGFloat(index) * storyHeight
+      drawFittingText(story.title, x: x, top: storyTop, width: width, pageHeight: pageHeight, fontSize: 18, minimumFontSize: 10, weight: .regular)
+      if !story.stats.isEmpty {
+        drawText(story.stats, x: x, top: storyTop + 24, width: width, pageHeight: pageHeight, fontSize: 13, weight: .regular, color: .darkGray)
+      }
     }
   }
 
@@ -269,6 +310,41 @@ enum SleepRenderer {
     let height = fontSize * 1.4
     let rect = NSRect(x: x, y: pageHeight - top - height, width: width, height: height)
     NSAttributedString(string: text, attributes: attrs).draw(in: rect)
+  }
+
+  private static func drawFittingText(
+    _ text: String,
+    x: CGFloat,
+    top: CGFloat,
+    width: CGFloat,
+    pageHeight: CGFloat,
+    fontSize: CGFloat,
+    minimumFontSize: CGFloat,
+    weight: NSFont.Weight,
+    color: NSColor = .black
+  ) {
+    var size = fontSize
+    while size > minimumFontSize {
+      let font = NSFont.systemFont(ofSize: size, weight: weight)
+      let measured = (text as NSString).size(withAttributes: [.font: font]).width
+      if measured <= width {
+        break
+      }
+      size -= 1
+    }
+    drawText(text, x: x, top: top, width: width, pageHeight: pageHeight, fontSize: size, weight: weight, color: color)
+  }
+
+  private static func hackerNewsStories(from lines: [String]) -> [HackerNewsSleepStory] {
+    var stories: [HackerNewsSleepStory] = []
+    var index = 0
+    while index < lines.count && stories.count < 3 {
+      let title = lines[index]
+      let stats = index + 1 < lines.count ? lines[index + 1] : ""
+      stories.append(HackerNewsSleepStory(title: title, stats: stats))
+      index += 2
+    }
+    return stories
   }
 
   private static func readLines(_ url: URL) -> [String] {
@@ -408,4 +484,15 @@ private struct SleepSectionSpec {
   let maxLines: Int
   let lineHeight: CGFloat
   let weight: CGFloat
+  var style: SleepSectionStyle = .standard
+}
+
+private enum SleepSectionStyle {
+  case standard
+  case hackerNews
+}
+
+private struct HackerNewsSleepStory {
+  let title: String
+  let stats: String
 }

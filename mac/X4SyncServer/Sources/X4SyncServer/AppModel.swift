@@ -462,10 +462,13 @@ final class AppModel: ObservableObject {
   }
 
   private func writeSleepHNPreview(stories: [HNStory]) throws {
-    let lines = stories.prefix(3).enumerated().map { index, story in
+    let lines = stories.prefix(3).enumerated().flatMap { index, story in
       let points = story.score ?? 0
       let comments = story.commentCount ?? 0
-      return "\(index + 1). \(story.title) (\(points) pts, \(comments) comments)"
+      return [
+        "\(index + 1). \(story.title)",
+        "\(points) points / \(comments) comments"
+      ]
     }
     let text = lines.isEmpty ? "HN has no stories right now\n" : lines.joined(separator: "\n") + "\n"
     try text.write(to: sleepHNInputURL, atomically: true, encoding: .utf8)
