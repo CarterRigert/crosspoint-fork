@@ -1,10 +1,12 @@
 import AppKit
 import Foundation
+import IOKit.pwr_mgt
 import ServiceManagement
 
 @MainActor
 final class AppModel: ObservableObject {
   @Published var serverEnabled: Bool
+  @Published var keepAwakeEnabled: Bool
   @Published var launchAtLoginEnabled: Bool
   @Published var sleepEnabled: Bool
   @Published var sleepOrientation: SleepTextOrientation
@@ -26,6 +28,7 @@ final class AppModel: ObservableObject {
   private var server: StaticHTTPServer?
   private var hnTimer: Timer?
   private var didBootstrap = false
+  private var keepAwakeAssertionID = IOPMAssertionID(0)
 
   private var supportDir: URL {
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -54,6 +57,7 @@ final class AppModel: ObservableObject {
 
   init() {
     serverEnabled = defaults.object(forKey: "serverEnabled") as? Bool ?? false
+    keepAwakeEnabled = defaults.object(forKey: "keepAwakeEnabled") as? Bool ?? false
     launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     sleepEnabled = defaults.object(forKey: "sleepEnabled") as? Bool ?? true
     let storedOrientation = defaults.string(forKey: "sleepOrientation").flatMap(SleepTextOrientation.init(rawValue:))
@@ -93,6 +97,12 @@ final class AppModel: ObservableObject {
     } else {
       stopServer()
     }
+  }
+
+  func setKeepAwakeEnabled(_ enabled: Bool) {
+    defaults.set(enabled, forKey: "keepAwakeEnabled")
+    keepAwakeEnabled = enabled
+    updateKeepAwakeAssertion()
   }
 
   func setLaunchAtLoginEnabled(_ enabled: Bool) {
@@ -206,6 +216,7 @@ final class AppModel: ObservableObject {
       defaults.set(true, forKey: "serverEnabled")
       statusMessage = "Server running at \(serverURL)."
       lastError = nil
+      updateKeepAwakeAssertion()
     } catch {
       serverEnabled = false
       defaults.set(false, forKey: "serverEnabled")
@@ -218,7 +229,30 @@ final class AppModel: ObservableObject {
     server = nil
     serverEnabled = false
     defaults.set(false, forKey: "serverEnabled")
+    updateKeepAwakeAssertion()
     statusMessage = "Server stopped."
+  }
+
+  private func updateKeepAwakeAssertion() {
+    let shouldKeepAwake = keepAwakeEnabled && serverEnabled
+
+    if shouldKeepAwake && keepAwakeAssertionID == 0 {
+      let reason = "X4 Sync Server is serving files" as CFString
+      let result = IOPMAssertionCreateWithName(
+        kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+        IOPMAssertionLevel(kIOPMAssertionLevelOn),
+        reason,
+        &keepAwakeAssertionID
+      )
+      if result != kIOReturnSuccess {
+        keepAwakeAssertionID = 0
+        lastError = "Could not keep Mac awake."
+        statusMessage = "Could not keep Mac awake."
+      }
+    } else if !shouldKeepAwake && keepAwakeAssertionID != 0 {
+      IOPMAssertionRelease(keepAwakeAssertionID)
+      keepAwakeAssertionID = 0
+    }
   }
 
   private func recordRequest(_ request: HTTPRequestLog) {

@@ -63,6 +63,12 @@ struct ContentView: View {
       }
 
       GridRow {
+        Toggle("Keep Mac awake", isOn: Binding(get: { model.keepAwakeEnabled }, set: { model.setKeepAwakeEnabled($0) }))
+        Text(model.keepAwakeEnabled && model.serverEnabled ? "Idle sleep blocked" : "Normal sleep")
+          .foregroundStyle(.secondary)
+      }
+
+      GridRow {
         Toggle("Launch at login", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLoginEnabled($0) }))
         Text(model.launchAtLoginEnabled ? "Starts after Mac login" : "Manual launch")
           .foregroundStyle(.secondary)
