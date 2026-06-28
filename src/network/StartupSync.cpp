@@ -14,6 +14,7 @@
 #include "CrossPointSettings.h"
 #include "HttpDownloader.h"
 #include "WifiCredentialStore.h"
+#include "util/BookCacheUtils.h"
 
 namespace {
 constexpr char LOG_TAG[] = "SYNC";
@@ -214,16 +215,45 @@ bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles
   return true;
 }
 
-bool copyDownloadedFile(const std::string& tempPath, const std::string& destPath) {
+bool deleteExistingDestination(const std::string& destPath) {
+  if (!Storage.exists(destPath.c_str())) {
+    return true;
+  }
+
+  LOG_INF(LOG_TAG, "Deleting existing file before replace: %s", destPath.c_str());
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (Storage.remove(destPath.c_str()) || !Storage.exists(destPath.c_str())) {
+      LOG_INF(LOG_TAG, "Deleted existing file: %s", destPath.c_str());
+      return true;
+    }
+    delay(50);
+  }
+
+  LOG_ERR(LOG_TAG, "Failed to delete existing file: %s", destPath.c_str());
+  return false;
+}
+
+bool copyDownloadedFileToNewDestination(const std::string& tempPath, const std::string& destPath) {
   HalFile src;
   if (!Storage.openFileForRead(LOG_TAG, tempPath, src)) {
     LOG_ERR(LOG_TAG, "Failed to open temp file for copy: %s", tempPath.c_str());
     return false;
   }
 
+  if (src.size() == 0) {
+    LOG_ERR(LOG_TAG, "Downloaded temp file is empty: %s", tempPath.c_str());
+    src.close();
+    return false;
+  }
+
+  if (!deleteExistingDestination(destPath)) {
+    src.close();
+    return false;
+  }
+
   HalFile dst;
   if (!Storage.openFileForWrite(LOG_TAG, destPath, dst)) {
-    LOG_ERR(LOG_TAG, "Failed to open destination for overwrite: %s", destPath.c_str());
+    LOG_ERR(LOG_TAG, "Failed to open destination after delete: %s", destPath.c_str());
     src.close();
     return false;
   }
@@ -258,7 +288,7 @@ bool copyDownloadedFile(const std::string& tempPath, const std::string& destPath
     return false;
   }
 
-  LOG_INF(LOG_TAG, "Overwrote %s (%zu bytes)", destPath.c_str(), copied);
+  LOG_INF(LOG_TAG, "Recreated %s (%zu bytes)", destPath.c_str(), copied);
   return true;
 }
 
@@ -268,10 +298,11 @@ bool promoteDownloadedFile(const std::string& tempPath, const std::string& destP
     return false;
   }
 
-  if (!copyDownloadedFile(tempPath, destPath)) {
+  if (!copyDownloadedFileToNewDestination(tempPath, destPath)) {
     return false;
   }
 
+  clearBookCache(destPath);
   Storage.remove(tempPath.c_str());
   return true;
 }

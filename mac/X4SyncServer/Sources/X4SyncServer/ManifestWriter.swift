@@ -10,6 +10,7 @@ enum ManifestWriter {
     let path: String
     let url: String
     let sha256: String
+    let deleteFirst: Bool
   }
 
   private struct Manifest: Codable {
@@ -21,7 +22,7 @@ enum ManifestWriter {
     let base = serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     let files = entries.map { entry in
       let urlPath = entry.urlPath.hasPrefix("/") ? entry.urlPath : "/" + entry.urlPath
-      return FileEntry(path: entry.path, url: base + urlPath, sha256: "")
+      return FileEntry(path: entry.path, url: base + urlPath, sha256: "", deleteFirst: true)
     }
 
     let manifest = Manifest(updated: ISO8601DateFormatter().string(from: Date()), files: files)
