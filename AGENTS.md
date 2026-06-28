@@ -1,83 +1,145 @@
-I want to modify CrossPoint Reader for the XTEINK X4 to add a minimal “startup sync” proof of concept.
+# CrossPoint X4 Sync Fork: Agent Notes
 
-Shipyard note:
-This project is being worked on inside a Shipyard VPS/Docker workspace. The repo lives at
-/shipyard/projects/cross-point-fork/workspace, and pushes should use the configured GitHub deploy key.
+This fork has moved past the original startup-sync proof of concept. Keep future
+work aligned with the current shape of the project.
 
-Project goal:
-Eventually I want the X4 to automatically pull fresh generated content from a local server when it starts/wakes up. The server will later generate things like:
-- a sleep.bmp todo/dashboard image
-- an e-reader-ready Hacker News digest EPUB
-- other synced files
+## Current Product Shape
 
-But for this first implementation, do NOT build the todo list or Hacker News pipeline. I want to tackle the hard part first: proving that the X4 can automatically pull a file from an HTTP server after startup and save it to the SD card.
+- Firmware on the XTEINK X4 pulls finished files from a local HTTP sync server.
+- The Mac helper app in `mac/X4SyncServer` generates and serves:
+  - `/manifest.json`
+  - `/sleep.bmp`, saved on the X4 as `/sleep.bmp`
+  - `/HNLatest.epub`, saved on the X4 as `/HNLatest.epub`
+- The X4 should stay dumb and battery-efficient. Do generation, API calls,
+  calendar/todo/weather integrations, and Hacker News fetching on the Mac.
+- Sync is best-effort. If Wi-Fi, server, download, or save fails, CrossPoint
+  should continue normally.
 
-Target behavior for MVP:
-When CrossPoint starts up:
-1. If a Sync Server URL setting is blank, do nothing.
-2. If a Sync Server URL is configured, connect to saved Wi-Fi if needed.
-3. Fetch:
-   {Sync Server URL}/manifest.json
-4. Parse the manifest.
-5. Download one small test file listed in the manifest.
-6. Save it to the SD card, for example:
-   /Sync/test.txt
-7. Show a small status message or log:
-   - “Sync skipped” if no URL is configured
-   - “Sync OK” if the file downloaded and saved
-   - “Sync failed” if Wi-Fi/server/download/save failed
-8. Never block the normal reader startup for very long.
-9. Use short timeouts.
-10. Do not delete existing files.
-11. Do not overwrite the final destination unless the new file download completed successfully.
-12. Prefer writing to a temp file first, then renaming it to the final path.
+## User Workflow To Preserve
 
-Suggested manifest shape:
-{
-  "updated": "2026-06-27T08:00:00-07:00",
-  "files": [
-    {
-      "path": "/Sync/test.txt",
-      "url": "http://192.168.1.50:8080/test.txt",
-      "sha256": ""
-    }
-  ]
-}
+For a non-developer Mac user:
 
-For the first version:
-- It is okay to ignore sha256 or leave validation as TODO.
-- It is okay to only download the first file in the manifest.
-- It is okay to use a hardcoded default path if path handling is risky.
-- It is okay to expose the Sync Server URL as a simple setting, config value, or compile-time constant if adding UI settings is too much at first.
-- Please look for existing CrossPoint code that already does Wi-Fi, HTTP downloads, OPDS downloads, OTA checks, WebDAV/file transfer, or SD card writes, and reuse those patterns instead of inventing a totally separate networking stack.
+1. Download or clone the repo.
+2. Use `dist/X4SyncServer.app.zip` as the ready-built Mac app.
+3. Open the app, turn on the server, and use the displayed server URL.
+4. Plug in the X4 over USB when needed.
+5. Use the app's Device controls:
+   - `Refresh`
+   - `Flash Firmware`
+   - `Push Sync URL`
 
-Important constraints:
-- This is for an embedded e-ink device, so keep it lightweight.
-- Do not make the device continuously poll.
-- Do not try to run Codex or an LLM on the X4.
-- The X4 should stay dumb and battery-efficient.
-- The server/computer will handle generating content later.
-- The X4 only needs to pull finished files.
-- Sync should be best-effort. If it fails, the reader should continue normally.
-- Avoid draining battery or making startup frustrating.
+Do not require the user to install Python, PlatformIO, Swift, or esptool just to
+run the packaged app. The release app bundle should contain:
 
-Acceptance criteria:
-1. I can run a simple test server on my computer, e.g.:
-   python3 -m http.server 8080
-2. The server folder contains:
-   manifest.json
-   test.txt
-3. I configure the X4/CrossPoint with the server URL.
-4. I restart/open CrossPoint.
-5. The X4 fetches manifest.json.
-6. The X4 downloads test.txt.
-7. The file appears on the SD card at /Sync/test.txt.
-8. If the server is offline, CrossPoint still starts normally and shows/logs a sync failure.
+- `Contents/Resources/firmware.bin`
+- `Contents/Resources/x4-flasher`
 
-After this works, the next milestones will be:
-- download /sleep.bmp and save it as the custom sleep image
-- download /HN/hn-latest.epub and save it in a readable folder
-- later build a server-side generator for todo dashboard + Hacker News digest
-- possibly add sync on wake/before sleep in addition to startup
+## Important Paths
 
-Please inspect the existing CrossPoint project structure and propose the smallest safe code change to implement this proof of concept. Explain which files you would modify, why, and then implement the MVP.
+- Firmware sync implementation: `src/network/StartupSync.cpp`
+- Firmware settings and serial command wiring: `src/main.cpp`
+- Mac app: `mac/X4SyncServer`
+- Mac app state/orchestration: `mac/X4SyncServer/Sources/X4SyncServer/AppModel.swift`
+- Sleep BMP renderer: `mac/X4SyncServer/Sources/X4SyncServer/SleepRenderer.swift`
+- HN EPUB generation: `mac/X4SyncServer/Sources/X4SyncServer/EpubBuilder.swift`
+- HN API client: `mac/X4SyncServer/Sources/X4SyncServer/HNClient.swift`
+- Static server/API routes: `mac/X4SyncServer/Sources/X4SyncServer/StaticHTTPServer.swift`
+- Manifest generation: `mac/X4SyncServer/Sources/X4SyncServer/ManifestWriter.swift`
+- App packaging script: `mac/X4SyncServer/Scripts/build-app.sh`
+- Standalone flasher entrypoint: `mac/X4SyncServer/Scripts/x4_flash_helper.py`
+- Ready-built artifacts: `dist/`
+
+## Sleep Screen Customization
+
+The normal extension point for a user-customized sleep screen is the app support
+folder, not firmware:
+
+```text
+~/Library/Application Support/X4SyncServer/SleepInputs/
+```
+
+The app reads:
+
+- `todos.txt`
+- `calendar.txt`
+- `weather.txt`
+- `notes.txt`
+
+If `build_sleep_inputs.sh` exists there and is executable, the app runs it before
+rendering `sleep.bmp`. Prefer this hook for personal integrations with calendar,
+todo apps, weather commands, Shortcuts, local scripts, or Codex-generated
+workflows.
+
+Only edit `SleepRenderer.swift` when the visual layout, typography, sections, or
+BMP rendering behavior needs to change. The output must remain a 480 x 800 BMP
+that the X4 can render as the root `/sleep.bmp`.
+
+The app also exposes a manual regeneration endpoint:
+
+```bash
+curl http://YOUR_MAC_IP:8080/api/regenerate-sleep
+```
+
+## Hacker News EPUB Customization
+
+Keep HN generation on the Mac. The X4 should only download the finished
+`HNLatest.epub`.
+
+- Change fetching/filtering in `HNClient.swift`.
+- Change EPUB structure and formatting in `EpubBuilder.swift`.
+- Preserve the first-page condensed list of top stories unless the user asks to
+  change it.
+
+## Firmware Constraints
+
+- Do not add continuous polling on the X4.
+- Do not run Codex, an LLM, calendar APIs, todo APIs, or HN APIs on the X4.
+- Keep startup/wake sync bounded with short timeouts.
+- Download to a temp file first, then promote to the final path.
+- Avoid deleting user files unless the user explicitly asks for that behavior.
+- Preserve version/size/hash checks so current files are skipped.
+- Be very careful with sleep/boot paths; avoid blocking boot or sleep forever.
+
+## Build And Verification Commands
+
+Firmware:
+
+```bash
+pio run -e default
+```
+
+Mac app from source:
+
+```bash
+cd mac/X4SyncServer
+swift run X4SyncServer
+```
+
+Packaged Mac app:
+
+```bash
+mac/X4SyncServer/Scripts/build-app.sh
+ditto -c -k --sequesterRsrc --keepParent mac/X4SyncServer/.build/app/X4SyncServer.app dist/X4SyncServer.app.zip
+env LC_ALL=C LANG=C shasum -a 256 dist/firmware.bin dist/X4SyncServer.app.zip > dist/SHA256SUMS
+env LC_ALL=C LANG=C shasum -a 256 -c dist/SHA256SUMS
+```
+
+The standalone flasher requires PyInstaller when rebuilding the app bundle:
+
+```bash
+.pio/platformio-core/penv/bin/python -m pip install pyinstaller
+```
+
+Smoke-test bundled flasher:
+
+```bash
+mac/X4SyncServer/.build/app/X4SyncServer.app/Contents/Resources/x4-flasher version
+```
+
+## Artifact Policy
+
+If source changes affect firmware or the packaged Mac app, refresh the matching
+files in `dist/` so a non-developer can use the repo without rebuilding.
+
+If only a personal `SleepInputs` script changes outside the repo, a rebuild is
+not needed.

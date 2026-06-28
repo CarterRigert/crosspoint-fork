@@ -21,6 +21,22 @@ If you only want to install and run this fork, use the files in `dist/`:
 - `dist/X4SyncServer.app.zip` - unzip this on macOS and run `X4SyncServer.app`.
 - `dist/SHA256SUMS` - optional checksums for confirming the downloaded files.
 
+For a family/non-developer setup, the easiest path is to clone or download this
+repo and use the ready-built app zip in `dist/`. The app bundle includes the
+firmware and a standalone USB flasher helper, so the Mac running the app should
+not need Python, PlatformIO, Swift, or esptool installed.
+
+Use the source tree when you want Codex or another developer to customize the
+sleep screen, Hacker News EPUB, or Mac app behavior. Most personal sleep-screen
+automation can live outside the repo in:
+
+```text
+~/Library/Application Support/X4SyncServer/SleepInputs/build_sleep_inputs.sh
+```
+
+That script can update `todos.txt`, `calendar.txt`, `weather.txt`, and
+`notes.txt`; the Mac app turns those files into `/sleep.bmp`.
+
 ## Build and Flash This Fork
 
 Clone with submodules, install the Python build tooling, and build the default X4 firmware:
