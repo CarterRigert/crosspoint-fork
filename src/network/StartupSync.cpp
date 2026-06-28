@@ -214,28 +214,65 @@ bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles
   return true;
 }
 
+bool copyDownloadedFile(const std::string& tempPath, const std::string& destPath) {
+  HalFile src;
+  if (!Storage.openFileForRead(LOG_TAG, tempPath, src)) {
+    LOG_ERR(LOG_TAG, "Failed to open temp file for copy: %s", tempPath.c_str());
+    return false;
+  }
+
+  HalFile dst;
+  if (!Storage.openFileForWrite(LOG_TAG, destPath, dst)) {
+    LOG_ERR(LOG_TAG, "Failed to open destination for overwrite: %s", destPath.c_str());
+    src.close();
+    return false;
+  }
+
+  uint8_t buffer[2048];
+  size_t copied = 0;
+  bool ok = true;
+  while (true) {
+    const int read = src.read(buffer, sizeof(buffer));
+    if (read < 0) {
+      LOG_ERR(LOG_TAG, "Failed reading temp file: %s", tempPath.c_str());
+      ok = false;
+      break;
+    }
+    if (read == 0) {
+      break;
+    }
+    if (dst.write(buffer, static_cast<size_t>(read)) != static_cast<size_t>(read)) {
+      LOG_ERR(LOG_TAG, "Failed writing destination: %s", destPath.c_str());
+      ok = false;
+      break;
+    }
+    copied += static_cast<size_t>(read);
+  }
+
+  dst.flush();
+  src.close();
+  dst.close();
+
+  if (!ok || copied == 0) {
+    Storage.remove(destPath.c_str());
+    return false;
+  }
+
+  LOG_INF(LOG_TAG, "Overwrote %s (%zu bytes)", destPath.c_str(), copied);
+  return true;
+}
+
 bool promoteDownloadedFile(const std::string& tempPath, const std::string& destPath) {
   if (!Storage.exists(tempPath.c_str())) {
     LOG_ERR(LOG_TAG, "Temp file missing: %s", tempPath.c_str());
     return false;
   }
 
-  if (Storage.exists(destPath.c_str())) {
-    LOG_INF(LOG_TAG, "Replacing existing file: %s", destPath.c_str());
-    if (!Storage.remove(destPath.c_str()) && Storage.exists(destPath.c_str())) {
-      delay(50);
-      if (!Storage.remove(destPath.c_str()) && Storage.exists(destPath.c_str())) {
-        LOG_ERR(LOG_TAG, "Failed to remove existing file: %s", destPath.c_str());
-        return false;
-      }
-    }
-  }
-
-  if (!Storage.rename(tempPath.c_str(), destPath.c_str())) {
-    LOG_ERR(LOG_TAG, "Failed to promote temp file: %s -> %s", tempPath.c_str(), destPath.c_str());
+  if (!copyDownloadedFile(tempPath, destPath)) {
     return false;
   }
 
+  Storage.remove(tempPath.c_str());
   return true;
 }
 
