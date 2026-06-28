@@ -38,17 +38,7 @@ enum SleepRenderer {
     )
 
     let pageSize = logicalPageSize(for: orientation)
-    let image = NSImage(size: pageSize)
-    image.lockFocus()
-    drawPage(content, pageSize: pageSize)
-    image.unlockFocus()
-
-    guard let tiff = image.tiffRepresentation,
-          let rep = NSBitmapImageRep(data: tiff)
-    else {
-      throw NSError(domain: "SleepRenderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not render sleep image."])
-    }
-
+    let rep = try renderPage(content, pageSize: pageSize)
     let bmp = makeBMP(from: rep, orientation: orientation)
     try bmp.write(to: outputURL, options: .atomic)
   }
@@ -60,6 +50,32 @@ enum SleepRenderer {
     case .landscapeLeft, .landscapeRight:
       return NSSize(width: height, height: width)
     }
+  }
+
+  private static func renderPage(_ content: SleepContent, pageSize: NSSize) throws -> NSBitmapImageRep {
+    guard let rep = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: Int(pageSize.width),
+      pixelsHigh: Int(pageSize.height),
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    ), let context = NSGraphicsContext(bitmapImageRep: rep) else {
+      throw NSError(domain: "SleepRenderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not render sleep image."])
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.cgContext.setShouldAntialias(true)
+    context.cgContext.setAllowsAntialiasing(true)
+    drawPage(content, pageSize: pageSize)
+    NSGraphicsContext.restoreGraphicsState()
+
+    return rep
   }
 
   private static func drawPage(_ content: SleepContent, pageSize: NSSize) {
@@ -198,7 +214,7 @@ enum SleepRenderer {
     data.appendUInt32LE(54)
     data.appendUInt32LE(40)
     data.appendInt32LE(Int32(width))
-    data.appendInt32LE(Int32(height))
+    data.appendInt32LE(-Int32(height))
     data.appendUInt16LE(1)
     data.appendUInt16LE(24)
     data.appendUInt32LE(0)
@@ -234,14 +250,14 @@ enum SleepRenderer {
     orientation: SleepTextOrientation
   ) -> (x: Int, y: Int) {
     switch orientation {
-    case .upsideDown:
-      return (x, y)
     case .rightSideUp:
+      return (x, y)
+    case .upsideDown:
       return (sourceWidth - 1 - x, sourceHeight - 1 - y)
     case .landscapeLeft:
-      return (y, sourceHeight - 1 - x)
-    case .landscapeRight:
       return (sourceWidth - 1 - y, x)
+    case .landscapeRight:
+      return (y, sourceHeight - 1 - x)
     }
   }
 

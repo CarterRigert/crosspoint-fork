@@ -220,26 +220,23 @@ bool promoteDownloadedFile(const std::string& tempPath, const std::string& destP
     return false;
   }
 
-  if (!Storage.exists(destPath.c_str())) {
-    return Storage.rename(tempPath.c_str(), destPath.c_str());
+  if (Storage.exists(destPath.c_str())) {
+    LOG_INF(LOG_TAG, "Replacing existing file: %s", destPath.c_str());
+    if (!Storage.remove(destPath.c_str()) && Storage.exists(destPath.c_str())) {
+      delay(50);
+      if (!Storage.remove(destPath.c_str()) && Storage.exists(destPath.c_str())) {
+        LOG_ERR(LOG_TAG, "Failed to remove existing file: %s", destPath.c_str());
+        return false;
+      }
+    }
   }
 
-  const std::string backupPath = tempPath + ".old";
-  Storage.remove(backupPath.c_str());
-
-  if (!Storage.rename(destPath.c_str(), backupPath.c_str())) {
-    LOG_ERR(LOG_TAG, "Failed to stage existing file: %s", destPath.c_str());
+  if (!Storage.rename(tempPath.c_str(), destPath.c_str())) {
+    LOG_ERR(LOG_TAG, "Failed to promote temp file: %s -> %s", tempPath.c_str(), destPath.c_str());
     return false;
   }
 
-  if (Storage.rename(tempPath.c_str(), destPath.c_str())) {
-    Storage.remove(backupPath.c_str());
-    return true;
-  }
-
-  LOG_ERR(LOG_TAG, "Failed to promote temp file: %s", destPath.c_str());
-  Storage.rename(backupPath.c_str(), destPath.c_str());
-  return false;
+  return true;
 }
 
 bool downloadFile(const SyncFile& syncFile) {
