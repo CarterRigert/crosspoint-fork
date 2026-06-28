@@ -1,3 +1,128 @@
+# CrossPoint X4 Startup Sync Fork
+
+This fork adds a minimal startup sync proof of concept to CrossPoint Reader for the XTEINK X4.
+
+On startup or wake, CrossPoint now:
+
+- skips sync when `startupSyncServerUrl` is blank
+- connects to the last saved Wi-Fi network
+- fetches `{startupSyncServerUrl}/manifest.json`
+- downloads the first file listed in the manifest
+- writes it to a temporary SD-card file first, then promotes it to the final path
+- logs `Sync skipped`, `Sync OK`, or `Sync failed`
+
+The MVP intentionally does not generate todo dashboards, Hacker News EPUBs, or other content. The X4 only pulls finished files from your local server.
+
+## Build and Flash This Fork
+
+Clone with submodules, install the Python build tooling, and build the default X4 firmware:
+
+```bash
+git clone --recursive git@github.com:CarterRigert/crosspoint-fork.git
+cd crosspoint-fork
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -U pip pioarduino "clang-format>=21,<22"
+python -m pip install -r requirements.txt
+pio run -e default
+```
+
+The firmware binary is written to:
+
+```text
+.pio/build/default/firmware.bin
+```
+
+Flash either way:
+
+- Web flasher: open `https://crosspointreader.com/#flash-tools`, choose X4, choose `Custom .bin`, and upload `.pio/build/default/firmware.bin`.
+- Command line:
+
+```bash
+pio run -e default -t upload --upload-port /dev/ttyACM0
+```
+
+Adjust `/dev/ttyACM0` for your computer. If the browser or upload tool cannot see the X4, read the upstream USB-locked device notes below.
+
+## Configure Startup Sync
+
+First save Wi-Fi credentials on the device:
+
+1. Open CrossPoint settings.
+2. Go to `System` -> `Wi-Fi Networks`.
+3. Join the same network as your computer.
+
+Then set the sync server URL using one of these options:
+
+- Device settings: `System` -> `Startup Sync URL`, enter something like `http://192.168.1.50:8080`.
+- Web settings API while CrossPoint web server mode is running:
+
+```bash
+curl -X POST "http://X4_IP_ADDRESS/api/settings" \
+  -H "Content-Type: application/json" \
+  -d '{"startupSyncServerUrl":"http://192.168.1.50:8080"}'
+```
+
+- SD-card edit: add this field to `/.crosspoint/settings.json`:
+
+```json
+{
+  "startupSyncServerUrl": "http://192.168.1.50:8080"
+}
+```
+
+Use your computer's LAN IP address. `localhost` will not work from the X4 because it points to the X4 itself.
+
+## Test With a Local Server
+
+On your computer:
+
+```bash
+mkdir -p /tmp/x4-sync-test
+cd /tmp/x4-sync-test
+printf 'hello from startup sync\n' > test.txt
+cat > manifest.json <<'JSON'
+{
+  "updated": "2026-06-27T08:00:00-07:00",
+  "files": [
+    {
+      "path": "/Sync/test.txt",
+      "url": "http://192.168.1.50:8080/test.txt",
+      "sha256": ""
+    }
+  ]
+}
+JSON
+python3 -m http.server 8080 --bind 0.0.0.0
+```
+
+Replace `192.168.1.50` with your computer's LAN IP in both `manifest.json` and `startupSyncServerUrl`.
+
+Restart or wake CrossPoint. After sync completes, the SD card should contain:
+
+```text
+/Sync/test.txt
+```
+
+For serial logs:
+
+```bash
+python3 -m pip install pyserial colorama matplotlib
+python3 scripts/debugging_monitor.py
+```
+
+Expected log lines include `Sync skipped`, `Sync OK`, or `Sync failed`. If the server is offline or Wi-Fi cannot connect, startup continues normally and logs `Sync failed`.
+
+## MVP Limits
+
+- Only the first manifest file is downloaded.
+- `sha256` is logged as a TODO and not validated yet.
+- Sync runs once at startup/wake; there is no polling loop.
+- HTTP operations use short 5-second timeouts, and Wi-Fi connect waits up to 8 seconds in a background task.
+- Existing target files are only replaced after the new download has completed into a temp file.
+
+---
+
 # CrossPoint Reader
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)

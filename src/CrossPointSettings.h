@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <iosfwd>
 
+#ifndef STARTUP_SYNC_SERVER_URL
+#define STARTUP_SYNC_SERVER_URL ""
+#endif
+
 class CrossPointSettings {
  private:
   // Private constructor for singleton
@@ -235,6 +239,8 @@ class CrossPointSettings {
   char opdsServerUrl[128] = "";
   char opdsUsername[64] = "";
   char opdsPassword[64] = "";
+  // Startup sync proof-of-concept. Empty disables sync.
+  char startupSyncServerUrl[128] = STARTUP_SYNC_SERVER_URL;
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // Long-press page turn button behavior

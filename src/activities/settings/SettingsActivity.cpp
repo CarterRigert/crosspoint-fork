@@ -23,6 +23,7 @@
 #include "StatusBarSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -226,6 +227,23 @@ void SettingsActivity::toggleCurrentSetting() {
     } else {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
     }
+  } else if (setting.type == SettingType::STRING && setting.stringMaxLen > 0) {
+    char* ptr = reinterpret_cast<char*>(&SETTINGS) + setting.stringOffset;
+    const std::string currentValue = ptr;
+    const std::string prefillValue = currentValue.empty() ? "http://" : currentValue;
+    startActivityForResult(
+        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, I18N.get(setting.nameId), prefillValue,
+                                                setting.stringMaxLen - 1, InputType::Url),
+        [ptr, maxLen = setting.stringMaxLen](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            const auto& kb = std::get<KeyboardResult>(result.data);
+            const std::string valueToSave = (kb.text == "https://" || kb.text == "http://") ? "" : kb.text;
+            strncpy(ptr, valueToSave.c_str(), maxLen - 1);
+            ptr[maxLen - 1] = '\0';
+            SETTINGS.saveToFile();
+          }
+        });
+    return;
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
 
@@ -374,6 +392,9 @@ void SettingsActivity::render(RenderLock&&) {
           } else {
             valueText = std::to_string(SETTINGS.*(setting.valuePtr));
           }
+        } else if (setting.type == SettingType::STRING && setting.stringMaxLen > 0) {
+          const char* value = reinterpret_cast<const char*>(&SETTINGS) + setting.stringOffset;
+          valueText = value[0] == '\0' ? tr(STR_NOT_SET) : value;
         }
         return valueText;
       },
