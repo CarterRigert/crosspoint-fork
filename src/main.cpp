@@ -141,7 +141,7 @@ bool shouldDeferStartupSyncedReaderResume() {
   return SETTINGS.startupSyncServerUrl[0] != '\0' && APP_STATE.openEpubPath == "/HNLatest.epub";
 }
 
-bool shouldSyncSleepImageBeforeSleep(bool isQuickResumeSleep) {
+bool shouldWaitForSleepImageBeforeSleep(bool isQuickResumeSleep) {
   if (isQuickResumeSleep || !StartupSync::isSleepImageUpdating()) {
     return false;
   }
@@ -261,9 +261,17 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   APP_STATE.saveToFile();
 
-  if (shouldSyncSleepImageBeforeSleep(isQuickResumeSleep)) {
-    GUI.drawPopup(renderer, "Syncing before sleeping");
-    StartupSync::syncSleepImageBeforeSleep();
+  if (StartupSync::isRunning()) {
+    const bool waitForSleepImage = shouldWaitForSleepImageBeforeSleep(isQuickResumeSleep);
+    if (!isQuickResumeSleep) {
+      GUI.drawPopup(renderer, "Syncing before sleeping");
+    }
+    if (StartupSync::prepareForSleep(waitForSleepImage) == StartupSync::Result::Failed) {
+      if (!isQuickResumeSleep) {
+        GUI.drawPopup(renderer, "Sync stopping. Try again.");
+      }
+      return;
+    }
   }
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():

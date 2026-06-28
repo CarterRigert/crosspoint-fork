@@ -30,7 +30,7 @@ constexpr char HN_LATEST_PATH[] = "/HNLatest.epub";
 constexpr int WIFI_CONNECT_TIMEOUT_MS = 8000;
 constexpr int HTTP_TIMEOUT_MS = 5000;
 constexpr int SLEEP_SYNC_WAIT_TIMEOUT_MS = 60000;
-constexpr int CANCEL_WAIT_TIMEOUT_MS = 2000;
+constexpr int CANCEL_WAIT_TIMEOUT_MS = HTTP_TIMEOUT_MS + 2000;
 constexpr size_t MAX_MANIFEST_SIZE = 8192;
 constexpr size_t MAX_MANIFEST_FILES = 8;
 constexpr uint32_t TASK_STACK_SIZE = 8192;
@@ -609,38 +609,45 @@ StartupSync::Result StartupSync::runOnce() {
   return runSync(SyncMode::AllFiles, WIFI_CONNECT_TIMEOUT_MS, HTTP_TIMEOUT_MS, &cancelRequested);
 }
 
-StartupSync::Result StartupSync::syncSleepImageBeforeSleep() {
+StartupSync::Result StartupSync::prepareForSleep(bool waitForSleepImage) {
   if (!syncTaskHandle) {
-    LOG_INF(LOG_TAG, "Sleep sync skipped: no startup sync running");
+    LOG_INF(LOG_TAG, "Startup sync stop skipped: no startup sync running");
     return Result::Skipped;
   }
 
-  if (sleepSyncState == FileSyncState::Resolved) {
-    LOG_INF(LOG_TAG, "Sleep sync skipped: sleep image already resolved");
-    return Result::Skipped;
+  if (waitForSleepImage && sleepSyncState != FileSyncState::Resolved) {
+    LOG_INF(LOG_TAG, "Waiting for startup sync sleep image before sleep");
+    const unsigned long waitStart = millis();
+    while (syncTaskHandle && sleepSyncState != FileSyncState::Resolved &&
+           millis() - waitStart < SLEEP_SYNC_WAIT_TIMEOUT_MS) {
+      delay(50);
+    }
+
+    if (sleepSyncState != FileSyncState::Resolved) {
+      LOG_ERR(LOG_TAG, "Sleep image sync timed out before sleep");
+      return Result::Failed;
+    }
+
+    LOG_INF(LOG_TAG, "Sleep image resolved before sleep");
   }
 
-  LOG_INF(LOG_TAG, "Waiting for startup sync sleep image before sleep");
-  const unsigned long waitStart = millis();
-  while (syncTaskHandle && sleepSyncState != FileSyncState::Resolved &&
-         millis() - waitStart < SLEEP_SYNC_WAIT_TIMEOUT_MS) {
-    delay(50);
-  }
-
+  LOG_INF(LOG_TAG, "Stopping startup sync before sleep");
   cancelRequested = true;
   const unsigned long cancelStart = millis();
   while (syncTaskHandle && millis() - cancelStart < CANCEL_WAIT_TIMEOUT_MS) {
     delay(25);
   }
 
-  if (sleepSyncState == FileSyncState::Resolved) {
-    LOG_INF(LOG_TAG, "Sleep image resolved before sleep");
+  if (!syncTaskHandle) {
+    LOG_INF(LOG_TAG, "Startup sync stopped before sleep");
     return Result::Ok;
   }
 
-  LOG_ERR(LOG_TAG, "Sleep image sync timed out before sleep");
+  LOG_ERR(LOG_TAG, "Startup sync stop timed out before sleep");
   return Result::Failed;
 }
+
+StartupSync::Result StartupSync::syncSleepImageBeforeSleep() { return prepareForSleep(true); }
 
 bool StartupSync::isRunning() { return syncTaskHandle != nullptr; }
 

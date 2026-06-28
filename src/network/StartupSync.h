@@ -10,6 +10,7 @@ enum class Result {
 
 void start();
 Result runOnce();
+Result prepareForSleep(bool waitForSleepImage);
 Result syncSleepImageBeforeSleep();
 bool isRunning();
 bool isSleepImageUpdating();
