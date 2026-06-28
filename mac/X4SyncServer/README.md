@@ -41,6 +41,17 @@ cd mac/X4SyncServer
 open .build/app/X4SyncServer.app
 ```
 
+The app bundle includes `firmware.bin` and, when PyInstaller is available in the
+local PlatformIO or project Python environment, a standalone `x4-flasher` helper.
+That lets the Flash Firmware button work on another Mac without installing
+Python, PlatformIO, or esptool.
+
+To recreate a standalone release bundle locally, install PyInstaller once:
+
+```bash
+.pio/platformio-core/penv/bin/python -m pip install pyinstaller
+```
+
 ## Sleep Screen Inputs
 
 The app creates:

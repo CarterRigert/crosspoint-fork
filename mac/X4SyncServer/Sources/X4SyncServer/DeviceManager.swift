@@ -21,7 +21,7 @@ enum DeviceManager {
       case .firmwareMissing:
         return "Bundled firmware.bin was not found."
       case .flashHelperMissing:
-        return "No compatible esptool helper found. Install Python 3.10+ with esptool, or rebuild the app bundle."
+        return "No bundled X4 flasher helper found. Rebuild the app bundle, or install esptool."
       case .incompatiblePython:
         return "A bundled esptool helper exists, but no Python 3.10+ executable was found."
       case .serialOpenFailed(let path):
@@ -129,43 +129,20 @@ enum DeviceManager {
 
     let process = Process()
     switch helper {
+    case .standalone(let flasherURL):
+      process.executableURL = flasherURL
+      process.arguments = flashArguments(port: port, firmwareURL: firmwareURL)
+      process.environment = mergedEnvironment()
     case .python(let pythonURL, let pythonPath):
       process.executableURL = pythonURL
-      process.arguments = [
-        "-m", "esptool",
-        "--chip", "esp32c3",
-        "--port", port,
-        "--baud", "921600",
-        "--before", "default-reset",
-        "--after", "hard-reset",
-        "write-flash",
-        "-z",
-        "--flash-mode", "dio",
-        "--flash-freq", "80m",
-        "--flash-size", "16MB",
-        "0x10000",
-        firmwareURL.path
-      ]
+      process.arguments = ["-m", "esptool"] + flashArguments(port: port, firmwareURL: firmwareURL)
       process.environment = mergedEnvironment(extra: [
         "PYTHONPATH": pythonPath,
         "PYTHONUNBUFFERED": "1"
       ])
     case .esptool(let esptoolURL):
       process.executableURL = esptoolURL
-      process.arguments = [
-        "--chip", "esp32c3",
-        "--port", port,
-        "--baud", "921600",
-        "--before", "default-reset",
-        "--after", "hard-reset",
-        "write-flash",
-        "-z",
-        "--flash-mode", "dio",
-        "--flash-freq", "80m",
-        "--flash-size", "16MB",
-        "0x10000",
-        firmwareURL.path
-      ]
+      process.arguments = flashArguments(port: port, firmwareURL: firmwareURL)
       process.environment = mergedEnvironment()
     }
 
@@ -184,11 +161,17 @@ enum DeviceManager {
   }
 
   private enum FlashHelper {
+    case standalone(URL)
     case python(URL, String)
     case esptool(URL)
   }
 
   private static func flashHelper() throws -> FlashHelper {
+    if let flasherURL = Bundle.main.resourceURL?.appendingPathComponent("x4-flasher"),
+       FileManager.default.isExecutableFile(atPath: flasherURL.path) {
+      return .standalone(flasherURL)
+    }
+
     if let resourceURL = Bundle.main.resourceURL?.appendingPathComponent("python/esptool"),
        FileManager.default.fileExists(atPath: resourceURL.path),
        let pythonURL = compatiblePythonExecutable() {
@@ -208,6 +191,23 @@ enum DeviceManager {
     }
 
     throw DeviceError.flashHelperMissing
+  }
+
+  private static func flashArguments(port: String, firmwareURL: URL) -> [String] {
+    [
+      "--chip", "esp32c3",
+      "--port", port,
+      "--baud", "921600",
+      "--before", "default-reset",
+      "--after", "hard-reset",
+      "write-flash",
+      "-z",
+      "--flash-mode", "dio",
+      "--flash-freq", "80m",
+      "--flash-size", "16MB",
+      "0x10000",
+      firmwareURL.path
+    ]
   }
 
   private static func compatiblePythonExecutable() -> URL? {

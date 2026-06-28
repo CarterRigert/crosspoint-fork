@@ -8,6 +8,9 @@ swift build -c release
 APP_DIR=".build/app/X4SyncServer.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
+FLASHER_NAME="x4-flasher"
+FLASHER_SCRIPT="Scripts/x4_flash_helper.py"
+FLASHER_BUILD_DIR=".build/flasher"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
@@ -21,21 +24,53 @@ fi
 
 PYTHON_RESOURCES="$RESOURCES_DIR/python"
 ESPTOOL_PACKAGE="../../.pio/platformio-core/packages/tool-esptoolpy/esptool"
+ESPTOOL_ROOT="../../.pio/platformio-core/packages/tool-esptoolpy"
 SITE_PACKAGES="$(find ../../.venv/lib -path '*/site-packages' -type d 2>/dev/null | head -n 1 || true)"
+PIO_PYINSTALLER="../../.pio/platformio-core/penv/bin/pyinstaller"
+VENV_PYINSTALLER="../../.venv/bin/pyinstaller"
+PATH_PYINSTALLER="$(command -v pyinstaller || true)"
+PYINSTALLER=""
 
-if [[ -d "$ESPTOOL_PACKAGE" ]]; then
-  mkdir -p "$PYTHON_RESOURCES"
-  cp -R "$ESPTOOL_PACKAGE" "$PYTHON_RESOURCES/"
+for candidate in "$PIO_PYINSTALLER" "$VENV_PYINSTALLER" "$PATH_PYINSTALLER"; do
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    PYINSTALLER="$candidate"
+    break
+  fi
+done
+
+if [[ -n "$PYINSTALLER" && -d "$ESPTOOL_PACKAGE" ]]; then
+  rm -rf "$FLASHER_BUILD_DIR"
+  "$PYINSTALLER" \
+    --clean \
+    --noconfirm \
+    --onefile \
+    --name "$FLASHER_NAME" \
+    --distpath "$FLASHER_BUILD_DIR/dist" \
+    --workpath "$FLASHER_BUILD_DIR/work" \
+    --specpath "$FLASHER_BUILD_DIR/spec" \
+    --paths "$ESPTOOL_ROOT" \
+    --collect-all esptool \
+    "$FLASHER_SCRIPT"
+  cp "$FLASHER_BUILD_DIR/dist/$FLASHER_NAME" "$RESOURCES_DIR/$FLASHER_NAME"
+  chmod 755 "$RESOURCES_DIR/$FLASHER_NAME"
 fi
 
-if [[ -n "$SITE_PACKAGES" && -d "$PYTHON_RESOURCES" ]]; then
-  for package in serial click rich_click rich markdown_it mdurl pygments yaml bitstring bitarray intelhex ecdsa reedsolo; do
-    if [[ -e "$SITE_PACKAGES/$package" ]]; then
-      cp -R "$SITE_PACKAGES/$package" "$PYTHON_RESOURCES/"
+if [[ ! -x "$RESOURCES_DIR/$FLASHER_NAME" ]]; then
+  echo "warning: standalone $FLASHER_NAME was not built; falling back to bundled Python esptool resources" >&2
+  if [[ -d "$ESPTOOL_PACKAGE" ]]; then
+    mkdir -p "$PYTHON_RESOURCES"
+    cp -R "$ESPTOOL_PACKAGE" "$PYTHON_RESOURCES/"
+  fi
+
+  if [[ -n "$SITE_PACKAGES" && -d "$PYTHON_RESOURCES" ]]; then
+    for package in serial click rich_click rich markdown_it mdurl pygments yaml bitstring bitarray intelhex ecdsa reedsolo; do
+      if [[ -e "$SITE_PACKAGES/$package" ]]; then
+        cp -R "$SITE_PACKAGES/$package" "$PYTHON_RESOURCES/"
+      fi
+    done
+    if [[ -f "$SITE_PACKAGES/typing_extensions.py" ]]; then
+      cp "$SITE_PACKAGES/typing_extensions.py" "$PYTHON_RESOURCES/"
     fi
-  done
-  if [[ -f "$SITE_PACKAGES/typing_extensions.py" ]]; then
-    cp "$SITE_PACKAGES/typing_extensions.py" "$PYTHON_RESOURCES/"
   fi
 fi
 
