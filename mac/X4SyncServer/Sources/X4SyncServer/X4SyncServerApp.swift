@@ -8,7 +8,7 @@ struct X4SyncServerApp: App {
     WindowGroup {
       ContentView()
         .environmentObject(model)
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: 820, minHeight: 640)
     }
     .windowResizability(.contentSize)
   }

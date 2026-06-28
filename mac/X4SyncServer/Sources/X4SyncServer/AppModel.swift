@@ -10,6 +10,8 @@ final class AppModel: ObservableObject {
   @Published var launchAtLoginEnabled: Bool
   @Published var sleepEnabled: Bool
   @Published var sleepOrientation: SleepTextOrientation
+  @Published var sleepRegenerateTimerEnabled: Bool
+  @Published var sleepRegenerateIntervalMinutes: Int
   @Published var hnEnabled: Bool
   @Published var hnIntervalMinutes: Int
   @Published var isBusy: Bool = false
@@ -18,6 +20,7 @@ final class AppModel: ObservableObject {
   @Published var serverURL: String = ""
   @Published var manifestStatus: String = "Not written"
   @Published var sleepStatus: String = "Not generated"
+  @Published var sleepRegenerationStatus: String = "No trigger yet"
   @Published var hnStatus: String = "Not generated"
   @Published var lastRequestStatus: String = "No requests yet"
 
@@ -27,8 +30,10 @@ final class AppModel: ObservableObject {
   private let fileManager = FileManager.default
   private var server: StaticHTTPServer?
   private var hnTimer: Timer?
+  private var sleepTimer: Timer?
   private var didBootstrap = false
   private var keepAwakeAssertionID = IOPMAssertionID(0)
+  private var pendingSleepRegenerationSource: String?
 
   private var supportDir: URL {
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -55,6 +60,10 @@ final class AppModel: ObservableObject {
     publicDir.appendingPathComponent("HNLatest.epub")
   }
 
+  var sleepTriggerURL: String {
+    "\(serverURL)/api/regenerate-sleep"
+  }
+
   init() {
     serverEnabled = defaults.object(forKey: "serverEnabled") as? Bool ?? false
     keepAwakeEnabled = defaults.object(forKey: "keepAwakeEnabled") as? Bool ?? false
@@ -62,6 +71,9 @@ final class AppModel: ObservableObject {
     sleepEnabled = defaults.object(forKey: "sleepEnabled") as? Bool ?? true
     let storedOrientation = defaults.string(forKey: "sleepOrientation").flatMap(SleepTextOrientation.init(rawValue:))
     sleepOrientation = storedOrientation ?? .upsideDown
+    sleepRegenerateTimerEnabled = defaults.object(forKey: "sleepRegenerateTimerEnabled") as? Bool ?? false
+    let storedSleepInterval = defaults.integer(forKey: "sleepRegenerateIntervalMinutes")
+    sleepRegenerateIntervalMinutes = storedSleepInterval == 0 ? 15 : storedSleepInterval
     hnEnabled = defaults.object(forKey: "hnEnabled") as? Bool ?? true
     let storedInterval = defaults.integer(forKey: "hnIntervalMinutes")
     hnIntervalMinutes = storedInterval == 0 ? 60 : storedInterval
@@ -76,6 +88,7 @@ final class AppModel: ObservableObject {
       updateServerURL()
       try refreshGeneratedFilesIfNeeded()
       try refreshManifest()
+      scheduleSleepTimer()
       scheduleHNTimer()
       if serverEnabled {
         startServer()
@@ -124,8 +137,11 @@ final class AppModel: ObservableObject {
   func settingsChanged() {
     defaults.set(sleepEnabled, forKey: "sleepEnabled")
     defaults.set(sleepOrientation.rawValue, forKey: "sleepOrientation")
+    defaults.set(sleepRegenerateTimerEnabled, forKey: "sleepRegenerateTimerEnabled")
+    defaults.set(sleepRegenerateIntervalMinutes, forKey: "sleepRegenerateIntervalMinutes")
     defaults.set(hnEnabled, forKey: "hnEnabled")
     defaults.set(hnIntervalMinutes, forKey: "hnIntervalMinutes")
+    scheduleSleepTimer()
     scheduleHNTimer()
 
     let shouldFetchHN = hnEnabled && !fileManager.fileExists(atPath: hnEPUBURL.path)
@@ -153,6 +169,14 @@ final class AppModel: ObservableObject {
     }
   }
 
+  func sleepTimerSettingsChanged() {
+    defaults.set(sleepRegenerateTimerEnabled, forKey: "sleepRegenerateTimerEnabled")
+    defaults.set(sleepRegenerateIntervalMinutes, forKey: "sleepRegenerateIntervalMinutes")
+    scheduleSleepTimer()
+    sleepRegenerationStatus = sleepRegenerateTimerEnabled ? "Timer every \(sleepRegenerateIntervalMinutes) min" : "Timer off"
+    statusMessage = "Sleep timer settings saved."
+  }
+
   func sleepOrientationChanged() {
     defaults.set(sleepOrientation.rawValue, forKey: "sleepOrientation")
     guard sleepEnabled else {
@@ -163,11 +187,34 @@ final class AppModel: ObservableObject {
   }
 
   func regenerateSleepScreen() {
+    requestSleepRegeneration(source: "Manual")
+  }
+
+  func regenerateSleepScreenFromAPI() {
+    requestSleepRegeneration(source: "API")
+  }
+
+  private func requestSleepRegeneration(source: String) {
+    guard sleepEnabled else {
+      sleepRegenerationStatus = "\(source) ignored; sleep screen off"
+      statusMessage = "Sleep screen is disabled."
+      return
+    }
+
+    if isBusy {
+      pendingSleepRegenerationSource = source
+      sleepRegenerationStatus = "\(source) queued"
+      statusMessage = "Sleep regeneration queued."
+      return
+    }
+
+    sleepRegenerationStatus = "\(source) running"
     runBusyTask("Generating sleep.bmp...") {
       try SleepRenderer.render(inputsDir: self.inputsDir, outputURL: self.sleepBMPURL, orientation: self.sleepOrientation)
       try self.refreshManifest()
       await MainActor.run {
         self.sleepStatus = self.fileStatus(self.sleepBMPURL)
+        self.sleepRegenerationStatus = "\(source) \(self.shortTimestamp())"
         self.statusMessage = "Generated sleep.bmp."
       }
     }
@@ -191,6 +238,12 @@ final class AppModel: ObservableObject {
     statusMessage = "Copied server URL."
   }
 
+  func copySleepTriggerURL() {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(sleepTriggerURL, forType: .string)
+    statusMessage = "Copied sleep trigger URL."
+  }
+
   func openInputsFolder() {
     NSWorkspace.shared.open(inputsDir)
   }
@@ -208,6 +261,11 @@ final class AppModel: ObservableObject {
       nextServer.onRequest = { [weak self] request in
         Task { @MainActor in
           self?.recordRequest(request)
+        }
+      }
+      nextServer.onSleepRegenerateRequest = { [weak self] in
+        Task { @MainActor in
+          self?.regenerateSleepScreenFromAPI()
         }
       }
       try nextServer.start()
@@ -287,6 +345,7 @@ final class AppModel: ObservableObject {
       try SleepRenderer.render(inputsDir: inputsDir, outputURL: sleepBMPURL, orientation: sleepOrientation)
     }
     sleepStatus = fileStatus(sleepBMPURL)
+    sleepRegenerationStatus = sleepRegenerateTimerEnabled ? "Timer every \(sleepRegenerateIntervalMinutes) min" : "Timer off"
     hnStatus = fileStatus(hnEPUBURL)
   }
 
@@ -309,6 +368,18 @@ final class AppModel: ObservableObject {
     }
 
     return entries
+  }
+
+  private func scheduleSleepTimer() {
+    sleepTimer?.invalidate()
+    sleepTimer = nil
+
+    guard sleepEnabled && sleepRegenerateTimerEnabled else { return }
+    sleepTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(sleepRegenerateIntervalMinutes * 60), repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        self?.requestSleepRegeneration(source: "Timer")
+      }
+    }
   }
 
   private func scheduleHNTimer() {
@@ -337,6 +408,10 @@ final class AppModel: ObservableObject {
     return ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
   }
 
+  private func shortTimestamp() -> String {
+    DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+  }
+
   private func runBusyTask(_ message: String, operation: @escaping () async throws -> Void) {
     guard !isBusy else { return }
     isBusy = true
@@ -353,6 +428,10 @@ final class AppModel: ObservableObject {
       }
       await MainActor.run {
         self.isBusy = false
+        if let pending = self.pendingSleepRegenerationSource {
+          self.pendingSleepRegenerationSource = nil
+          self.requestSleepRegeneration(source: pending)
+        }
       }
     }
   }

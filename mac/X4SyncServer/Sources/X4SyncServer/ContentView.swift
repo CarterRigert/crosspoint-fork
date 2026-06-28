@@ -102,6 +102,14 @@ struct ContentView: View {
       }
 
       GridRow {
+        Toggle("Sleep refresh timer", isOn: $model.sleepRegenerateTimerEnabled)
+        Stepper(value: $model.sleepRegenerateIntervalMinutes, in: 5...240, step: 5) {
+          Text("Every \(model.sleepRegenerateIntervalMinutes) min")
+        }
+        .disabled(!model.sleepEnabled || !model.sleepRegenerateTimerEnabled)
+      }
+
+      GridRow {
         Toggle("HN Latest EPUB", isOn: $model.hnEnabled)
         HStack(spacing: 12) {
           Stepper(value: $model.hnIntervalMinutes, in: 15...360, step: 15) {
@@ -119,6 +127,8 @@ struct ContentView: View {
     .toggleStyle(.switch)
     .onChange(of: model.sleepEnabled) { _, _ in model.settingsChanged() }
     .onChange(of: model.sleepOrientation) { _, _ in model.sleepOrientationChanged() }
+    .onChange(of: model.sleepRegenerateTimerEnabled) { _, _ in model.sleepTimerSettingsChanged() }
+    .onChange(of: model.sleepRegenerateIntervalMinutes) { _, _ in model.sleepTimerSettingsChanged() }
     .onChange(of: model.hnEnabled) { _, _ in model.settingsChanged() }
     .onChange(of: model.hnIntervalMinutes) { _, _ in model.settingsChanged() }
   }
@@ -131,7 +141,26 @@ struct ContentView: View {
       HStack(spacing: 24) {
         statusItem("Manifest", model.manifestStatus)
         statusItem("Sleep BMP", model.sleepStatus)
+        statusItem("Sleep Regen", model.sleepRegenerationStatus)
         statusItem("HN EPUB", model.hnStatus)
+      }
+
+      HStack(spacing: 8) {
+        Text("Sleep API")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(width: 78, alignment: .leading)
+        Text("GET \(model.sleepTriggerURL)")
+          .font(.system(.body, design: .monospaced))
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .textSelection(.enabled)
+        Button {
+          model.copySleepTriggerURL()
+        } label: {
+          Label("Copy", systemImage: "doc.on.doc")
+        }
+        .disabled(model.serverURL.isEmpty)
       }
 
       statusItem("Last Request", model.lastRequestStatus)

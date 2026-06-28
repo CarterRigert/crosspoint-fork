@@ -64,6 +64,16 @@ build_sleep_inputs.sh
 
 The app runs it before rendering `sleep.bmp`. This gives Shortcuts, cron, shell scripts, or Codex a stable integration point: update the text files, then the app turns them into a 480 x 800 uncompressed BMP.
 
+The Sleep refresh timer can regenerate `sleep.bmp` on a schedule, so changes made by calendar, todo, notes, or weather automation are picked up without touching the app.
+
+Other tools can also trigger regeneration through the server:
+
+```bash
+curl http://YOUR_MAC_IP:8080/api/regenerate-sleep
+```
+
+The app shows the exact Sleep API URL in the Output section. The endpoint accepts `GET` or `POST`, queues the work, and returns immediately.
+
 ## HN EPUB
 
 When enabled, the app fetches the top 30 Hacker News front-page stories using the public Firebase API, captures a bounded set of top comments, and writes `HNLatest.epub`. The first EPUB page is a condensed list with title, points, and comment count.

@@ -25,6 +25,7 @@ final class StaticHTTPServer: @unchecked Sendable {
   private let queue = DispatchQueue(label: "X4SyncServer.HTTPServer")
   private var listener: NWListener?
   var onRequest: (@Sendable (HTTPRequestLog) -> Void)?
+  var onSleepRegenerateRequest: (@Sendable () -> Void)?
 
   init(rootDirectory: URL, port: UInt16) {
     self.rootDirectory = rootDirectory
@@ -89,16 +90,34 @@ final class StaticHTTPServer: @unchecked Sendable {
     }
 
     let parts = firstLine.split(separator: " ")
-    guard parts.count >= 2, parts[0] == "GET" else {
+    guard parts.count >= 2 else {
       let method = parts.first.map(String.init) ?? "?"
       let path = parts.count >= 2 ? String(parts[1]) : "?"
-      let status = "405 Method Not Allowed"
-      return HTTPResponse(method: method, path: path, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Only GET is supported".utf8)))
+      let status = "400 Bad Request"
+      return HTTPResponse(method: method, path: path, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Bad request".utf8)))
     }
 
     let method = String(parts[0])
     let rawPath = String(parts[1])
     let path = sanitize(rawPath)
+
+    if path == "api/regenerate-sleep" {
+      guard method == "GET" || method == "POST" else {
+        let status = "405 Method Not Allowed"
+        return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Use GET or POST".utf8)))
+      }
+
+      onSleepRegenerateRequest?()
+      let status = "202 Accepted"
+      let body = Data(#"{"status":"queued","target":"sleep.bmp"}"#.utf8)
+      return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "application/json; charset=utf-8", body: body))
+    }
+
+    guard method == "GET" else {
+      let status = "405 Method Not Allowed"
+      return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Only GET is supported".utf8)))
+    }
+
     guard !path.isEmpty else {
       let status = "403 Forbidden"
       return HTTPResponse(method: method, path: rawPath, status: status, data: httpResponse(status: status, contentType: "text/plain", body: Data("Forbidden".utf8)))
