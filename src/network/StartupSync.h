@@ -10,6 +10,7 @@ enum class Result {
 
 void start();
 Result runOnce();
+Result syncSleepImageBeforeSleep();
 bool isRunning();
 
 }  // namespace StartupSync

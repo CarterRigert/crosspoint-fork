@@ -7,7 +7,10 @@
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <mbedtls/sha256.h>
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -21,16 +24,31 @@ constexpr char LOG_TAG[] = "SYNC";
 constexpr char MANIFEST_NAME[] = "manifest.json";
 constexpr char MANIFEST_TMP[] = "/.crosspoint/startup_sync_manifest.tmp";
 constexpr char DEFAULT_DEST_PATH[] = "/Sync/test.txt";
+constexpr char SLEEP_IMAGE_PATH[] = "/sleep.bmp";
 constexpr int WIFI_CONNECT_TIMEOUT_MS = 8000;
+constexpr int SLEEP_WIFI_CONNECT_TIMEOUT_MS = 5000;
 constexpr int HTTP_TIMEOUT_MS = 5000;
+constexpr int SLEEP_SYNC_WAIT_TIMEOUT_MS = 60000;
+constexpr int CANCEL_WAIT_TIMEOUT_MS = 2000;
 constexpr size_t MAX_MANIFEST_SIZE = 8192;
 constexpr size_t MAX_MANIFEST_FILES = 8;
 constexpr uint32_t TASK_STACK_SIZE = 8192;
 TaskHandle_t syncTaskHandle = nullptr;
+volatile bool cancelRequested = false;
+
+enum class SleepSyncState : uint8_t {
+  Idle,
+  Pending,
+  Resolved,
+};
+
+volatile SleepSyncState sleepSyncState = SleepSyncState::Idle;
 
 struct SyncFile {
   std::string url;
   std::string destPath;
+  std::string sha256;
+  uint64_t size = 0;
 };
 
 std::string trim(const char* value) {
@@ -49,6 +67,18 @@ std::string withoutTrailingSlashes(std::string value) {
   return value;
 }
 
+std::string toLowerAscii(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+
+bool isHexSha256(const std::string& value) {
+  if (value.size() != 64) return false;
+  return std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isxdigit(c); });
+}
+
 std::string joinUrl(const std::string& baseUrl, const std::string& path) {
   if (path.rfind("http://", 0) == 0 || path.rfind("https://", 0) == 0) {
     return path;
@@ -60,6 +90,10 @@ std::string joinUrl(const std::string& baseUrl, const std::string& path) {
 }
 
 std::string manifestUrlFor(const std::string& baseUrl) { return joinUrl(baseUrl, MANIFEST_NAME); }
+
+bool isSleepImage(const SyncFile& syncFile) { return syncFile.destPath == SLEEP_IMAGE_PATH; }
+
+bool hasVersionInfo(const SyncFile& syncFile) { return !syncFile.sha256.empty() || syncFile.size > 0; }
 
 bool isSafeSdPath(const std::string& path) {
   return path.size() > 1 && path.size() < 220 && path.front() == '/' && path.find("..") == std::string::npos &&
@@ -77,7 +111,95 @@ bool ensureParentDir(const std::string& path) {
   return parent == "/" || Storage.mkdir(parent.c_str());
 }
 
-bool connectSavedWifi() {
+bool computeFileSha256(const std::string& path, std::string& outSha256, uint64_t& outSize) {
+  HalFile file;
+  if (!Storage.openFileForRead(LOG_TAG, path, file)) {
+    return false;
+  }
+
+  mbedtls_sha256_context shaCtx;
+  mbedtls_sha256_init(&shaCtx);
+  mbedtls_sha256_starts(&shaCtx, /*is224=*/0);
+
+  uint8_t buffer[2048];
+  uint64_t total = 0;
+  bool ok = true;
+  while (file.available()) {
+    const int read = file.read(buffer, sizeof(buffer));
+    if (read < 0) {
+      ok = false;
+      break;
+    }
+    if (read == 0) {
+      break;
+    }
+    mbedtls_sha256_update(&shaCtx, buffer, static_cast<size_t>(read));
+    total += static_cast<uint64_t>(read);
+  }
+  file.close();
+
+  if (!ok) {
+    mbedtls_sha256_free(&shaCtx);
+    return false;
+  }
+
+  uint8_t digest[32];
+  mbedtls_sha256_finish(&shaCtx, digest);
+  mbedtls_sha256_free(&shaCtx);
+
+  static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+  char hex[65];
+  for (size_t i = 0; i < sizeof(digest); ++i) {
+    hex[i * 2] = HEX_DIGITS[digest[i] >> 4];
+    hex[i * 2 + 1] = HEX_DIGITS[digest[i] & 0x0F];
+  }
+  hex[64] = '\0';
+
+  outSha256 = hex;
+  outSize = total;
+  return true;
+}
+
+bool fileMatchesManifest(const SyncFile& syncFile, const std::string& path) {
+  if (syncFile.sha256.empty() && syncFile.size == 0) {
+    return false;
+  }
+
+  HalFile file;
+  if (!Storage.openFileForRead(LOG_TAG, path, file)) {
+    return false;
+  }
+  const uint64_t actualSize = file.fileSize64();
+  file.close();
+
+  if (syncFile.size > 0 && actualSize != syncFile.size) {
+    LOG_INF(LOG_TAG, "File size changed for %s: got %llu expected %llu", path.c_str(),
+            static_cast<unsigned long long>(actualSize), static_cast<unsigned long long>(syncFile.size));
+    return false;
+  }
+
+  if (syncFile.sha256.empty()) {
+    return syncFile.size > 0;
+  }
+
+  std::string actualSha256;
+  uint64_t hashedSize = 0;
+  if (!computeFileSha256(path, actualSha256, hashedSize)) {
+    return false;
+  }
+
+  if (syncFile.size > 0 && hashedSize != syncFile.size) {
+    return false;
+  }
+
+  const bool matches = actualSha256 == syncFile.sha256;
+  if (!matches) {
+    LOG_INF(LOG_TAG, "SHA256 changed for %s", path.c_str());
+  }
+  return matches;
+}
+
+bool connectSavedWifi(const int timeoutMs) {
   if (WiFi.status() == WL_CONNECTED) {
     LOG_INF(LOG_TAG, "Wi-Fi already connected: %s", WiFi.localIP().toString().c_str());
     return true;
@@ -114,7 +236,7 @@ bool connectSavedWifi() {
   }
 
   const unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
+  while (WiFi.status() != WL_CONNECTED && millis() - start < static_cast<unsigned long>(timeoutMs)) {
     delay(100);
   }
 
@@ -128,13 +250,14 @@ bool connectSavedWifi() {
   return true;
 }
 
-bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles) {
+bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles, volatile bool* cancelFlag,
+                  const int timeoutMs) {
   syncFiles.clear();
   Storage.mkdir("/.crosspoint");
   Storage.remove(MANIFEST_TMP);
 
   const std::string url = manifestUrlFor(serverUrl);
-  const auto result = HttpDownloader::downloadToFile(url, MANIFEST_TMP, nullptr, nullptr, "", "", HTTP_TIMEOUT_MS);
+  const auto result = HttpDownloader::downloadToFile(url, MANIFEST_TMP, nullptr, cancelFlag, "", "", timeoutMs);
   if (result != HttpDownloader::OK) {
     LOG_ERR(LOG_TAG, "Manifest fetch failed: %d", result);
     Storage.remove(MANIFEST_TMP);
@@ -199,11 +322,18 @@ bool readManifest(const std::string& serverUrl, std::vector<SyncFile>& syncFiles
     }
     fileUrl = joinUrl(serverUrl, fileUrl);
 
-    if (!entry["sha256"].isNull()) {
-      LOG_INF(LOG_TAG, "sha256 present but validation is not implemented yet");
+    std::string sha256 = toLowerAscii(trim(entry["sha256"] | ""));
+    if (!sha256.empty() && !isHexSha256(sha256)) {
+      LOG_ERR(LOG_TAG, "Ignoring invalid sha256 for %s", destPath.c_str());
+      sha256.clear();
     }
 
-    syncFiles.push_back({fileUrl, destPath});
+    uint64_t size = 0;
+    if (entry["size"].is<uint64_t>()) {
+      size = entry["size"].as<uint64_t>();
+    }
+
+    syncFiles.push_back({fileUrl, destPath, sha256, size});
   }
 
   if (syncFiles.empty()) {
@@ -307,9 +437,14 @@ bool promoteDownloadedFile(const std::string& tempPath, const std::string& destP
   return true;
 }
 
-bool downloadFile(const SyncFile& syncFile) {
+bool downloadFile(const SyncFile& syncFile, volatile bool* cancelFlag, const int timeoutMs) {
   const std::string& fileUrl = syncFile.url;
   const std::string& destPath = syncFile.destPath;
+
+  if (fileMatchesManifest(syncFile, destPath)) {
+    LOG_INF(LOG_TAG, "Up to date: %s", destPath.c_str());
+    return true;
+  }
 
   if (!ensureParentDir(destPath)) {
     LOG_ERR(LOG_TAG, "Failed to create destination directory");
@@ -319,9 +454,15 @@ bool downloadFile(const SyncFile& syncFile) {
   const std::string tempPath = destPath + ".download";
   Storage.remove(tempPath.c_str());
 
-  const auto result = HttpDownloader::downloadToFile(fileUrl, tempPath, nullptr, nullptr, "", "", HTTP_TIMEOUT_MS);
+  const auto result = HttpDownloader::downloadToFile(fileUrl, tempPath, nullptr, cancelFlag, "", "", timeoutMs);
   if (result != HttpDownloader::OK) {
     LOG_ERR(LOG_TAG, "File download failed: %d", result);
+    Storage.remove(tempPath.c_str());
+    return false;
+  }
+
+  if (hasVersionInfo(syncFile) && !fileMatchesManifest(syncFile, tempPath)) {
+    LOG_ERR(LOG_TAG, "Downloaded file did not match manifest: %s", destPath.c_str());
     Storage.remove(tempPath.c_str());
     return false;
   }
@@ -335,13 +476,46 @@ bool downloadFile(const SyncFile& syncFile) {
   return true;
 }
 
-bool downloadFiles(const std::vector<SyncFile>& syncFiles) {
+enum class SyncMode {
+  AllFiles,
+  SleepImageOnly,
+};
+
+bool downloadFiles(std::vector<SyncFile>& syncFiles, SyncMode mode, volatile bool* cancelFlag, const int timeoutMs) {
+  std::stable_sort(syncFiles.begin(), syncFiles.end(), [](const SyncFile& a, const SyncFile& b) {
+    return isSleepImage(a) && !isSleepImage(b);
+  });
+
   bool allOk = true;
+  bool sawSleepImage = false;
   for (const auto& syncFile : syncFiles) {
-    if (!downloadFile(syncFile)) {
+    if (cancelFlag && *cancelFlag) {
+      allOk = false;
+      break;
+    }
+
+    if (mode == SyncMode::SleepImageOnly && !isSleepImage(syncFile)) {
+      continue;
+    }
+
+    if (isSleepImage(syncFile)) {
+      sawSleepImage = true;
+      sleepSyncState = SleepSyncState::Pending;
+    }
+
+    if (!downloadFile(syncFile, cancelFlag, timeoutMs)) {
       allOk = false;
     }
+
+    if (isSleepImage(syncFile)) {
+      sleepSyncState = SleepSyncState::Resolved;
+    }
   }
+
+  if (!sawSleepImage) {
+    sleepSyncState = SleepSyncState::Resolved;
+  }
+
   return allOk;
 }
 
@@ -354,41 +528,89 @@ void disconnectWifi() {
   }
 }
 
+StartupSync::Result runSync(SyncMode mode, const int wifiTimeoutMs, const int httpTimeoutMs, volatile bool* cancelFlag) {
+  const std::string serverUrl = withoutTrailingSlashes(trim(SETTINGS.startupSyncServerUrl));
+  if (serverUrl.empty()) {
+    LOG_INF(LOG_TAG, "Sync skipped");
+    return StartupSync::Result::Skipped;
+  }
+
+  LOG_INF(LOG_TAG, "%s: %s", mode == SyncMode::SleepImageOnly ? "Sleep sync" : "Startup sync", serverUrl.c_str());
+
+  bool ok = false;
+  do {
+    if (!connectSavedWifi(wifiTimeoutMs)) break;
+    if (cancelFlag && *cancelFlag) break;
+
+    std::vector<SyncFile> syncFiles;
+    if (!readManifest(serverUrl, syncFiles, cancelFlag, httpTimeoutMs)) break;
+    if (cancelFlag && *cancelFlag) break;
+
+    ok = downloadFiles(syncFiles, mode, cancelFlag, httpTimeoutMs);
+  } while (false);
+
+  disconnectWifi();
+
+  if (!ok) {
+    sleepSyncState = SleepSyncState::Resolved;
+    LOG_ERR(LOG_TAG, "Sync failed");
+    return StartupSync::Result::Failed;
+  }
+
+  LOG_INF(LOG_TAG, "Sync OK");
+  return StartupSync::Result::Ok;
+}
+
 void syncTask(void*) {
   StartupSync::runOnce();
+  cancelRequested = false;
+  sleepSyncState = SleepSyncState::Resolved;
   syncTaskHandle = nullptr;
   vTaskDelete(nullptr);
 }
 }  // namespace
 
 StartupSync::Result StartupSync::runOnce() {
-  const std::string serverUrl = withoutTrailingSlashes(trim(SETTINGS.startupSyncServerUrl));
-  if (serverUrl.empty()) {
-    LOG_INF(LOG_TAG, "Sync skipped");
+  cancelRequested = false;
+  sleepSyncState = SleepSyncState::Idle;
+  return runSync(SyncMode::AllFiles, WIFI_CONNECT_TIMEOUT_MS, HTTP_TIMEOUT_MS, &cancelRequested);
+}
+
+StartupSync::Result StartupSync::syncSleepImageBeforeSleep() {
+  if (trim(SETTINGS.startupSyncServerUrl).empty()) {
+    LOG_INF(LOG_TAG, "Sleep sync skipped");
     return Result::Skipped;
   }
 
-  LOG_INF(LOG_TAG, "Startup sync: %s", serverUrl.c_str());
+  if (syncTaskHandle) {
+    LOG_INF(LOG_TAG, "Waiting for startup sync sleep image before sleep");
+    const unsigned long waitStart = millis();
+    while (syncTaskHandle && sleepSyncState != SleepSyncState::Resolved &&
+           millis() - waitStart < SLEEP_SYNC_WAIT_TIMEOUT_MS) {
+      delay(50);
+    }
 
-  bool ok = false;
-  do {
-    if (!connectSavedWifi()) break;
+    cancelRequested = true;
+    const unsigned long cancelStart = millis();
+    while (syncTaskHandle && millis() - cancelStart < CANCEL_WAIT_TIMEOUT_MS) {
+      delay(25);
+    }
 
-    std::vector<SyncFile> syncFiles;
-    if (!readManifest(serverUrl, syncFiles)) break;
+    if (sleepSyncState == SleepSyncState::Resolved) {
+      LOG_INF(LOG_TAG, "Sleep image resolved before sleep");
+      return Result::Ok;
+    }
 
-    ok = downloadFiles(syncFiles);
-  } while (false);
-
-  disconnectWifi();
-
-  if (ok) {
-    LOG_INF(LOG_TAG, "Sync OK");
-    return Result::Ok;
+    LOG_ERR(LOG_TAG, "Sleep image sync timed out before sleep");
+    return Result::Failed;
   }
 
-  LOG_ERR(LOG_TAG, "Sync failed");
-  return Result::Failed;
+  volatile bool sleepCancelRequested = false;
+  sleepSyncState = SleepSyncState::Pending;
+  const Result result = runSync(SyncMode::SleepImageOnly, SLEEP_WIFI_CONNECT_TIMEOUT_MS, HTTP_TIMEOUT_MS,
+                                &sleepCancelRequested);
+  sleepSyncState = SleepSyncState::Resolved;
+  return result;
 }
 
 bool StartupSync::isRunning() { return syncTaskHandle != nullptr; }

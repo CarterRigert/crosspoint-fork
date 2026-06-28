@@ -141,6 +141,15 @@ bool shouldDeferStartupSyncedReaderResume() {
   return SETTINGS.startupSyncServerUrl[0] != '\0' && APP_STATE.openEpubPath == "/HNLatest.epub";
 }
 
+bool shouldSyncSleepImageBeforeSleep(bool isQuickResumeSleep) {
+  if (isQuickResumeSleep || SETTINGS.startupSyncServerUrl[0] == '\0') {
+    return false;
+  }
+
+  return SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM ||
+         SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM;
+}
+
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
@@ -251,6 +260,11 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.showBootScreen = !isQuickResumeSleep;
 
   APP_STATE.saveToFile();
+
+  if (shouldSyncSleepImageBeforeSleep(isQuickResumeSleep)) {
+    GUI.drawPopup(renderer, "Syncing before sleeping");
+    StartupSync::syncSleepImageBeforeSleep();
+  }
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.

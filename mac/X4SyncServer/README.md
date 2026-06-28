@@ -74,6 +74,10 @@ curl http://YOUR_MAC_IP:8080/api/regenerate-sleep
 
 The app shows the exact Sleep API URL in the Output section. The endpoint accepts `GET` or `POST`, queues the work, and returns immediately.
 
+The manifest includes each served file's `sha256` and `size`. The X4 uses those values to skip `sleep.bmp` or `HNLatest.epub` when the SD-card copy is already current.
+
+When the X4 is about to enter a custom sleep-screen mode, it shows `Syncing before sleeping`, checks `/sleep.bmp`, downloads it only if the manifest version changed, then renders the sleep screen and sleeps. If the server cannot be reached, it continues sleeping with the existing image.
+
 ## HN EPUB
 
 When enabled, the app fetches the top 30 Hacker News front-page stories using the public Firebase API, captures a bounded set of top comments, and writes `HNLatest.epub`. The first EPUB page is a condensed list with title, points, and comment count.

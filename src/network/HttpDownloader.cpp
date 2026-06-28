@@ -28,7 +28,7 @@ constexpr size_t READ_CHUNK = 2048;
 struct Sink {
   std::function<bool(const uint8_t*, size_t)> write;  // returns false to abort the transfer
   HttpDownloader::ProgressCallback progress;
-  bool* cancelFlag = nullptr;
+  volatile bool* cancelFlag = nullptr;
   size_t total = 0;
   size_t downloaded = 0;
 };
@@ -171,7 +171,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
-                                                             ProgressCallback progress, bool* cancelFlag,
+                                                             ProgressCallback progress, volatile bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
                                                              const int timeoutMs) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());

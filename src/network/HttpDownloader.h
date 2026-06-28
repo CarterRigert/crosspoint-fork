@@ -42,7 +42,7 @@ class HttpDownloader {
    * Download a file to the SD card with optional credentials.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
+                                      ProgressCallback progress = nullptr, volatile bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       int timeoutMs = 60000);
 };
