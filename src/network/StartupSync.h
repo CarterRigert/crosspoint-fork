@@ -10,5 +10,6 @@ enum class Result {
 
 void start();
 Result runOnce();
+bool isRunning();
 
 }  // namespace StartupSync

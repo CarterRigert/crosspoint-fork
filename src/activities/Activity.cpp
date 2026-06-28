@@ -1,6 +1,8 @@
 #include "Activity.h"
 
 #include "ActivityManager.h"
+#include "components/UITheme.h"
+#include "network/StartupSync.h"
 
 void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str()); }
 
@@ -12,7 +14,15 @@ void Activity::requestUpdateAndWait() { activityManager.requestUpdateAndWait(); 
 
 void Activity::onGoHome(HomeMenuItem item) { activityManager.goHome(item); }
 
-void Activity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
+void Activity::onSelectBook(const std::string& path) {
+  if (path == "/HNLatest.epub" && StartupSync::isRunning()) {
+    LOG_INF("ACT", "Blocked HNLatest.epub open while startup sync is running");
+    GUI.drawPopup(renderer, "HN updating. Try again.");
+    return;
+  }
+
+  activityManager.goToReader(path);
+}
 
 void Activity::startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) {
   this->resultHandler = std::move(resultHandler);

@@ -391,6 +391,8 @@ StartupSync::Result StartupSync::runOnce() {
   return Result::Failed;
 }
 
+bool StartupSync::isRunning() { return syncTaskHandle != nullptr; }
+
 void StartupSync::start() {
   if (trim(SETTINGS.startupSyncServerUrl).empty()) {
     LOG_INF(LOG_TAG, "Sync skipped");

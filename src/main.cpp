@@ -137,6 +137,10 @@ enum class BootResume : uint8_t {
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
 
+bool shouldDeferStartupSyncedReaderResume() {
+  return SETTINGS.startupSyncServerUrl[0] != '\0' && APP_STATE.openEpubPath == "/HNLatest.epub";
+}
+
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
@@ -432,6 +436,11 @@ void setup() {
       break;
   }
 
+  const bool deferStartupSyncedReaderResume = shouldDeferStartupSyncedReaderResume();
+  if (deferStartupSyncedReaderResume) {
+    LOG_INF("MAIN", "Deferring reader resume for startup-synced book: %s", APP_STATE.openEpubPath.c_str());
+  }
+
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
@@ -440,14 +449,14 @@ void setup() {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
-             !APP_STATE.openEpubPath.empty()) {
+             !APP_STATE.openEpubPath.empty() && !deferStartupSyncedReaderResume) {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
-  } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
+  } else if (deferStartupSyncedReaderResume || APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
     // crashed (indicated by readerActivityLoadCount > 0)
