@@ -29,6 +29,7 @@ struct SleepRenderSections: Equatable {
   var todo: Bool
   var notes: Bool
   var hn: Bool
+  var hnStoryCount: Int = 3
 
   static let all = SleepRenderSections(weather: true, calendar: true, todo: true, notes: true, hn: true)
 }
@@ -177,7 +178,7 @@ enum SleepRenderer {
       specs.append(SleepSectionSpec(title: "Notes", lines: content.notes, maxLines: 4, lineHeight: 25, weight: 1.0))
     }
     if sections.hn {
-      let storyCount = max(1, min(10, hackerNewsStories(from: content.hn).count))
+      let storyCount = max(1, min(10, sections.hnStoryCount))
       specs.append(
         SleepSectionSpec(
           title: "HN Top \(storyCount)",

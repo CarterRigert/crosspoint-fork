@@ -78,7 +78,8 @@ final class AppModel: ObservableObject {
       calendar: sleepCalendarEnabled,
       todo: sleepTodoEnabled,
       notes: sleepNotesEnabled,
-      hn: sleepHNEnabled
+      hn: sleepHNEnabled,
+      hnStoryCount: sleepHNStoryCount
     )
   }
 
@@ -229,15 +230,7 @@ final class AppModel: ObservableObject {
   func sleepHNStoryCountChanged() {
     sleepHNStoryCount = Self.clampedHNStoryCount(sleepHNStoryCount)
     saveSleepSectionSettings()
-    guard sleepEnabled && sleepHNEnabled else {
-      statusMessage = "HN sleep count saved."
-      return
-    }
-    if hnEnabled {
-      updateHNNow()
-    } else {
-      regenerateSleepScreen()
-    }
+    statusMessage = "HN sleep count saved. Regenerate to apply."
   }
 
   func regenerateSleepScreen() {
@@ -480,8 +473,7 @@ final class AppModel: ObservableObject {
   }
 
   private func writeSleepHNPreview(stories: [HNStory]) throws {
-    let storyCount = Self.clampedHNStoryCount(sleepHNStoryCount)
-    let lines = stories.prefix(storyCount).enumerated().flatMap { index, story in
+    let lines = stories.prefix(10).enumerated().flatMap { index, story in
       let points = story.score ?? 0
       let comments = story.commentCount ?? 0
       return [
