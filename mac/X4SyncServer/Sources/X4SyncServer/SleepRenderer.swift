@@ -37,9 +37,10 @@ enum SleepRenderer {
       notes: readLines(inputsDir.appendingPathComponent("notes.txt"))
     )
 
-    let image = NSImage(size: NSSize(width: width, height: height))
+    let pageSize = logicalPageSize(for: orientation)
+    let image = NSImage(size: pageSize)
     image.lockFocus()
-    draw(content, orientation: orientation)
+    drawPage(content, pageSize: pageSize)
     image.unlockFocus()
 
     guard let tiff = image.tiffRepresentation,
@@ -48,38 +49,17 @@ enum SleepRenderer {
       throw NSError(domain: "SleepRenderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not render sleep image."])
     }
 
-    let bmp = makeBMP(from: rep)
+    let bmp = makeBMP(from: rep, orientation: orientation)
     try bmp.write(to: outputURL, options: .atomic)
   }
 
-  private static func draw(_ content: SleepContent, orientation: SleepTextOrientation) {
-    guard let context = NSGraphicsContext.current?.cgContext else { return }
-
-    NSColor.white.setFill()
-    NSRect(x: 0, y: 0, width: width, height: height).fill()
-
-    context.saveGState()
-
-    let logicalSize: NSSize
+  private static func logicalPageSize(for orientation: SleepTextOrientation) -> NSSize {
     switch orientation {
-    case .upsideDown:
-      logicalSize = NSSize(width: width, height: height)
-    case .rightSideUp:
-      logicalSize = NSSize(width: width, height: height)
-      context.translateBy(x: CGFloat(width), y: CGFloat(height))
-      context.rotate(by: .pi)
-    case .landscapeLeft:
-      logicalSize = NSSize(width: height, height: width)
-      context.translateBy(x: CGFloat(width), y: 0)
-      context.rotate(by: .pi / 2)
-    case .landscapeRight:
-      logicalSize = NSSize(width: height, height: width)
-      context.translateBy(x: 0, y: CGFloat(height))
-      context.rotate(by: -.pi / 2)
+    case .upsideDown, .rightSideUp:
+      return NSSize(width: width, height: height)
+    case .landscapeLeft, .landscapeRight:
+      return NSSize(width: height, height: width)
     }
-
-    drawPage(content, pageSize: logicalSize)
-    context.restoreGState()
   }
 
   private static func drawPage(_ content: SleepContent, pageSize: NSSize) {
@@ -203,7 +183,7 @@ enum SleepRenderer {
     }
   }
 
-  private static func makeBMP(from rep: NSBitmapImageRep) -> Data {
+  private static func makeBMP(from rep: NSBitmapImageRep, orientation: SleepTextOrientation) -> Data {
     let rowBytes = ((width * 3 + 3) / 4) * 4
     let pixelBytes = rowBytes * height
     let fileSize = 14 + 40 + pixelBytes
@@ -231,7 +211,8 @@ enum SleepRenderer {
     let padding = [UInt8](repeating: 0, count: rowBytes - width * 3)
     for y in 0..<height {
       for x in 0..<width {
-        let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) ?? .white
+        let source = sourcePixel(forOutputX: x, outputY: y, sourceWidth: rep.pixelsWide, sourceHeight: rep.pixelsHigh, orientation: orientation)
+        let color = rep.colorAt(x: source.x, y: source.y)?.usingColorSpace(.deviceRGB) ?? .white
         let red = UInt8(max(0, min(255, Int(round(color.redComponent * 255)))))
         let green = UInt8(max(0, min(255, Int(round(color.greenComponent * 255)))))
         let blue = UInt8(max(0, min(255, Int(round(color.blueComponent * 255)))))
@@ -243,6 +224,25 @@ enum SleepRenderer {
     }
 
     return data
+  }
+
+  private static func sourcePixel(
+    forOutputX x: Int,
+    outputY y: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    orientation: SleepTextOrientation
+  ) -> (x: Int, y: Int) {
+    switch orientation {
+    case .upsideDown:
+      return (x, y)
+    case .rightSideUp:
+      return (sourceWidth - 1 - x, sourceHeight - 1 - y)
+    case .landscapeLeft:
+      return (y, sourceHeight - 1 - x)
+    case .landscapeRight:
+      return (sourceWidth - 1 - y, x)
+    }
   }
 
   private static func dateString() -> String {
