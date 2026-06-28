@@ -104,6 +104,18 @@ struct ContentView: View {
       }
 
       GridRow {
+        Text("Sleep sections")
+        HStack(spacing: 12) {
+          Toggle("Weather", isOn: $model.sleepWeatherEnabled)
+          Toggle("Calendar", isOn: $model.sleepCalendarEnabled)
+          Toggle("Todo", isOn: $model.sleepTodoEnabled)
+          Toggle("Notes", isOn: $model.sleepNotesEnabled)
+          Toggle("HN", isOn: $model.sleepHNEnabled)
+        }
+        .disabled(!model.sleepEnabled || model.isBusy)
+      }
+
+      GridRow {
         Toggle("Sleep refresh timer", isOn: $model.sleepRegenerateTimerEnabled)
         Stepper(value: $model.sleepRegenerateIntervalMinutes, in: 5...240, step: 5) {
           Text("Every \(model.sleepRegenerateIntervalMinutes) min")
@@ -129,6 +141,11 @@ struct ContentView: View {
     .toggleStyle(.switch)
     .onChange(of: model.sleepEnabled) { _, _ in model.settingsChanged() }
     .onChange(of: model.sleepOrientation) { _, _ in model.sleepOrientationChanged() }
+    .onChange(of: model.sleepWeatherEnabled) { _, _ in model.sleepSectionSettingsChanged() }
+    .onChange(of: model.sleepCalendarEnabled) { _, _ in model.sleepSectionSettingsChanged() }
+    .onChange(of: model.sleepTodoEnabled) { _, _ in model.sleepSectionSettingsChanged() }
+    .onChange(of: model.sleepNotesEnabled) { _, _ in model.sleepSectionSettingsChanged() }
+    .onChange(of: model.sleepHNEnabled) { _, _ in model.sleepSectionSettingsChanged() }
     .onChange(of: model.sleepRegenerateTimerEnabled) { _, _ in model.sleepTimerSettingsChanged() }
     .onChange(of: model.sleepRegenerateIntervalMinutes) { _, _ in model.sleepTimerSettingsChanged() }
     .onChange(of: model.hnEnabled) { _, _ in model.settingsChanged() }

@@ -10,6 +10,11 @@ final class AppModel: ObservableObject {
   @Published var launchAtLoginEnabled: Bool
   @Published var sleepEnabled: Bool
   @Published var sleepOrientation: SleepTextOrientation
+  @Published var sleepWeatherEnabled: Bool
+  @Published var sleepCalendarEnabled: Bool
+  @Published var sleepTodoEnabled: Bool
+  @Published var sleepNotesEnabled: Bool
+  @Published var sleepHNEnabled: Bool
   @Published var sleepRegenerateTimerEnabled: Bool
   @Published var sleepRegenerateIntervalMinutes: Int
   @Published var hnEnabled: Bool
@@ -62,6 +67,20 @@ final class AppModel: ObservableObject {
     publicDir.appendingPathComponent("HNLatest.epub")
   }
 
+  private var sleepHNInputURL: URL {
+    inputsDir.appendingPathComponent("hn.txt")
+  }
+
+  private var sleepSections: SleepRenderSections {
+    SleepRenderSections(
+      weather: sleepWeatherEnabled,
+      calendar: sleepCalendarEnabled,
+      todo: sleepTodoEnabled,
+      notes: sleepNotesEnabled,
+      hn: sleepHNEnabled
+    )
+  }
+
   var sleepTriggerURL: String {
     "\(serverURL)/api/regenerate-sleep"
   }
@@ -73,6 +92,11 @@ final class AppModel: ObservableObject {
     sleepEnabled = defaults.object(forKey: "sleepEnabled") as? Bool ?? true
     let storedOrientation = defaults.string(forKey: "sleepOrientation").flatMap(SleepTextOrientation.init(rawValue:))
     sleepOrientation = storedOrientation ?? .upsideDown
+    sleepWeatherEnabled = defaults.object(forKey: "sleepWeatherEnabled") as? Bool ?? true
+    sleepCalendarEnabled = defaults.object(forKey: "sleepCalendarEnabled") as? Bool ?? true
+    sleepTodoEnabled = defaults.object(forKey: "sleepTodoEnabled") as? Bool ?? true
+    sleepNotesEnabled = defaults.object(forKey: "sleepNotesEnabled") as? Bool ?? true
+    sleepHNEnabled = defaults.object(forKey: "sleepHNEnabled") as? Bool ?? true
     sleepRegenerateTimerEnabled = defaults.object(forKey: "sleepRegenerateTimerEnabled") as? Bool ?? false
     let storedSleepInterval = defaults.integer(forKey: "sleepRegenerateIntervalMinutes")
     sleepRegenerateIntervalMinutes = storedSleepInterval == 0 ? 15 : storedSleepInterval
@@ -140,6 +164,7 @@ final class AppModel: ObservableObject {
   func settingsChanged() {
     defaults.set(sleepEnabled, forKey: "sleepEnabled")
     defaults.set(sleepOrientation.rawValue, forKey: "sleepOrientation")
+    saveSleepSectionSettings()
     defaults.set(sleepRegenerateTimerEnabled, forKey: "sleepRegenerateTimerEnabled")
     defaults.set(sleepRegenerateIntervalMinutes, forKey: "sleepRegenerateIntervalMinutes")
     defaults.set(hnEnabled, forKey: "hnEnabled")
@@ -151,8 +176,8 @@ final class AppModel: ObservableObject {
 
     Task {
       do {
-        if sleepEnabled && !fileManager.fileExists(atPath: sleepBMPURL.path) {
-          try SleepRenderer.render(inputsDir: inputsDir, outputURL: sleepBMPURL, orientation: sleepOrientation)
+        if sleepEnabled {
+          try renderSleepScreen()
         }
         try refreshManifest()
         await MainActor.run {
@@ -189,6 +214,15 @@ final class AppModel: ObservableObject {
     regenerateSleepScreen()
   }
 
+  func sleepSectionSettingsChanged() {
+    saveSleepSectionSettings()
+    guard sleepEnabled else {
+      statusMessage = "Sleep section settings saved."
+      return
+    }
+    regenerateSleepScreen()
+  }
+
   func regenerateSleepScreen() {
     requestSleepRegeneration(source: "Manual")
   }
@@ -213,7 +247,7 @@ final class AppModel: ObservableObject {
 
     sleepRegenerationStatus = "\(source) running"
     runBusyTask("Generating sleep.bmp...") {
-      try SleepRenderer.render(inputsDir: self.inputsDir, outputURL: self.sleepBMPURL, orientation: self.sleepOrientation)
+      try self.renderSleepScreen()
       try self.refreshManifest()
       await MainActor.run {
         self.sleepStatus = self.fileStatus(self.sleepBMPURL)
@@ -227,10 +261,18 @@ final class AppModel: ObservableObject {
     runBusyTask("Fetching Hacker News...") {
       let stories = try await HNClient().frontPageStories(limit: 30, commentsPerStory: 4)
       try EpubBuilder.buildHNLatest(stories: stories, outputURL: self.hnEPUBURL)
+      try self.writeSleepHNPreview(stories: stories)
+      if self.sleepEnabled {
+        try self.renderSleepScreen()
+      }
       try self.refreshManifest()
       await MainActor.run {
+        if self.sleepEnabled {
+          self.sleepStatus = self.fileStatus(self.sleepBMPURL)
+          self.sleepRegenerationStatus = "HN \(self.shortTimestamp())"
+        }
         self.hnStatus = self.fileStatus(self.hnEPUBURL)
-        self.statusMessage = "Updated HNLatest.epub."
+        self.statusMessage = self.sleepEnabled ? "Updated HNLatest.epub and sleep.bmp." : "Updated HNLatest.epub."
       }
     }
   }
@@ -379,7 +421,8 @@ final class AppModel: ObservableObject {
       ("todos.txt", "- Review today's calendar\n- Drink water\n- Read for 20 minutes\n"),
       ("calendar.txt", "9:00 Coffee\n12:30 Lunch\n6:00 Family time\n"),
       ("weather.txt", "Weather source not connected yet\n"),
-      ("notes.txt", "Edit these files, or add build_sleep_inputs.sh to generate them.\n")
+      ("notes.txt", "Edit these files, or add build_sleep_inputs.sh to generate them.\n"),
+      ("hn.txt", "HN has not updated yet\n")
     ]
 
     for (name, contents) in defaults {
@@ -392,7 +435,7 @@ final class AppModel: ObservableObject {
 
   private func refreshGeneratedFilesIfNeeded() throws {
     if sleepEnabled && !fileManager.fileExists(atPath: sleepBMPURL.path) {
-      try SleepRenderer.render(inputsDir: inputsDir, outputURL: sleepBMPURL, orientation: sleepOrientation)
+      try renderSleepScreen()
     }
     sleepStatus = fileStatus(sleepBMPURL)
     sleepRegenerationStatus = sleepRegenerateTimerEnabled ? "Timer every \(sleepRegenerateIntervalMinutes) min" : "Timer off"
@@ -404,6 +447,28 @@ final class AppModel: ObservableObject {
     let entries = manifestEntries()
     try ManifestWriter.write(entries: entries, serverURL: serverURL, outputURL: manifestURL)
     manifestStatus = "\(entries.count) file\(entries.count == 1 ? "" : "s")"
+  }
+
+  private func renderSleepScreen() throws {
+    try SleepRenderer.render(inputsDir: inputsDir, outputURL: sleepBMPURL, orientation: sleepOrientation, sections: sleepSections)
+  }
+
+  private func saveSleepSectionSettings() {
+    defaults.set(sleepWeatherEnabled, forKey: "sleepWeatherEnabled")
+    defaults.set(sleepCalendarEnabled, forKey: "sleepCalendarEnabled")
+    defaults.set(sleepTodoEnabled, forKey: "sleepTodoEnabled")
+    defaults.set(sleepNotesEnabled, forKey: "sleepNotesEnabled")
+    defaults.set(sleepHNEnabled, forKey: "sleepHNEnabled")
+  }
+
+  private func writeSleepHNPreview(stories: [HNStory]) throws {
+    let lines = stories.prefix(3).enumerated().map { index, story in
+      let points = story.score ?? 0
+      let comments = story.commentCount ?? 0
+      return "\(index + 1). \(story.title) (\(points) pts, \(comments) comments)"
+    }
+    let text = lines.isEmpty ? "HN has no stories right now\n" : lines.joined(separator: "\n") + "\n"
+    try text.write(to: sleepHNInputURL, atomically: true, encoding: .utf8)
   }
 
   private func manifestEntries() -> [ManifestEntry] {

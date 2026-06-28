@@ -64,11 +64,18 @@ The app reads:
 - `calendar.txt`
 - `weather.txt`
 - `notes.txt`
+- `hn.txt`
 
 If `build_sleep_inputs.sh` exists there and is executable, the app runs it before
 rendering `sleep.bmp`. Prefer this hook for personal integrations with calendar,
 todo apps, weather commands, Shortcuts, local scripts, or Codex-generated
 workflows.
+
+The Mac app has per-section sleep-screen toggles for Weather, Calendar, Todo,
+Notes, and HN. Preserve those toggles when changing layout behavior.
+
+When HN polling is enabled, the Mac app refreshes `hn.txt` with the top three HN
+story titles, points, and comment counts after each HN fetch.
 
 Only edit `SleepRenderer.swift` when the visual layout, typography, sections, or
 BMP rendering behavior needs to change. The output must remain a 480 x 800 BMP

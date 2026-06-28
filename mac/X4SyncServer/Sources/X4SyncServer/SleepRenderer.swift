@@ -23,22 +23,38 @@ enum SleepTextOrientation: String, CaseIterable, Identifiable {
   }
 }
 
+struct SleepRenderSections: Equatable {
+  var weather: Bool
+  var calendar: Bool
+  var todo: Bool
+  var notes: Bool
+  var hn: Bool
+
+  static let all = SleepRenderSections(weather: true, calendar: true, todo: true, notes: true, hn: true)
+}
+
 enum SleepRenderer {
   private static let width = 480
   private static let height = 800
 
-  static func render(inputsDir: URL, outputURL: URL, orientation: SleepTextOrientation = .upsideDown) throws {
+  static func render(
+    inputsDir: URL,
+    outputURL: URL,
+    orientation: SleepTextOrientation = .upsideDown,
+    sections: SleepRenderSections = .all
+  ) throws {
     try runInputHookIfPresent(inputsDir: inputsDir)
 
     let content = SleepContent(
       todos: readLines(inputsDir.appendingPathComponent("todos.txt")),
       calendar: readLines(inputsDir.appendingPathComponent("calendar.txt")),
       weather: readLines(inputsDir.appendingPathComponent("weather.txt")),
-      notes: readLines(inputsDir.appendingPathComponent("notes.txt"))
+      notes: readLines(inputsDir.appendingPathComponent("notes.txt")),
+      hn: readLines(inputsDir.appendingPathComponent("hn.txt"))
     )
 
     let pageSize = logicalPageSize(for: orientation)
-    let rep = try renderPage(content, pageSize: pageSize)
+    let rep = try renderPage(content, pageSize: pageSize, sections: sections)
     let bmp = makeBMP(from: rep, orientation: orientation)
     try bmp.write(to: outputURL, options: .atomic)
   }
@@ -52,7 +68,7 @@ enum SleepRenderer {
     }
   }
 
-  private static func renderPage(_ content: SleepContent, pageSize: NSSize) throws -> NSBitmapImageRep {
+  private static func renderPage(_ content: SleepContent, pageSize: NSSize, sections: SleepRenderSections) throws -> NSBitmapImageRep {
     guard let rep = NSBitmapImageRep(
       bitmapDataPlanes: nil,
       pixelsWide: Int(pageSize.width),
@@ -72,36 +88,40 @@ enum SleepRenderer {
     NSGraphicsContext.current = context
     context.cgContext.setShouldAntialias(true)
     context.cgContext.setAllowsAntialiasing(true)
-    drawPage(content, pageSize: pageSize)
+    drawPage(content, pageSize: pageSize, sections: sections)
     NSGraphicsContext.restoreGraphicsState()
 
     return rep
   }
 
-  private static func drawPage(_ content: SleepContent, pageSize: NSSize) {
+  private static func drawPage(_ content: SleepContent, pageSize: NSSize, sections: SleepRenderSections) {
     NSColor.white.setFill()
     NSRect(x: 0, y: 0, width: pageSize.width, height: pageSize.height).fill()
 
     if pageSize.width > pageSize.height {
-      drawLandscapePage(content, pageSize: pageSize)
+      drawLandscapePage(content, pageSize: pageSize, sections: sections)
     } else {
-      drawPortraitPage(content, pageSize: pageSize)
+      drawPortraitPage(content, pageSize: pageSize, sections: sections)
     }
   }
 
-  private static func drawPortraitPage(_ content: SleepContent, pageSize: NSSize) {
+  private static func drawPortraitPage(_ content: SleepContent, pageSize: NSSize, sections: SleepRenderSections) {
     drawText("Today", x: 28, top: 28, width: 424, pageHeight: pageSize.height, fontSize: 38, weight: .bold)
     drawText(dateString(), x: 30, top: 76, width: 424, pageHeight: pageSize.height, fontSize: 17, weight: .regular, color: .darkGray)
 
-    section("Weather", lines: content.weather, x: 30, top: 128, width: 420, pageHeight: pageSize.height, maxLines: 3)
-    section("Calendar", lines: content.calendar, x: 30, top: 238, width: 420, pageHeight: pageSize.height, maxLines: 5)
-    section("Todo", lines: content.todos, x: 30, top: 420, width: 420, pageHeight: pageSize.height, maxLines: 7)
-    section("Notes", lines: content.notes, x: 30, top: 656, width: 420, pageHeight: pageSize.height, maxLines: 3)
+    drawStackedSections(
+      sectionSpecs(content: content, sections: sections),
+      x: 30,
+      top: 128,
+      width: 420,
+      bottomTop: 738,
+      pageHeight: pageSize.height
+    )
 
     drawText("Last updated \(lastUpdatedString())", x: 30, top: 758, width: 420, pageHeight: pageSize.height, fontSize: 13, weight: .regular, color: .darkGray)
   }
 
-  private static func drawLandscapePage(_ content: SleepContent, pageSize: NSSize) {
+  private static func drawLandscapePage(_ content: SleepContent, pageSize: NSSize, sections: SleepRenderSections) {
     let margin: CGFloat = 28
     let gutter: CGFloat = 24
     let columnWidth = (pageSize.width - margin * 2 - gutter) / 2
@@ -110,13 +130,92 @@ enum SleepRenderer {
     drawText(dateString(), x: margin, top: 62, width: 360, pageHeight: pageSize.height, fontSize: 15, weight: .regular, color: .darkGray)
     drawText("Last updated \(lastUpdatedString())", x: pageSize.width - margin - 250, top: 36, width: 250, pageHeight: pageSize.height, fontSize: 12, weight: .regular, color: .darkGray)
 
-    let leftX = margin
-    let rightX = margin + columnWidth + gutter
+    let specs = sectionSpecs(content: content, sections: sections)
+    guard !specs.isEmpty else {
+      drawText("No sections enabled", x: margin, top: 160, width: pageSize.width - margin * 2, pageHeight: pageSize.height, fontSize: 20, weight: .regular, color: .gray)
+      return
+    }
 
-    section("Weather", lines: content.weather, x: leftX, top: 112, width: columnWidth, pageHeight: pageSize.height, maxLines: 3, lineHeight: 25)
-    section("Calendar", lines: content.calendar, x: rightX, top: 112, width: columnWidth, pageHeight: pageSize.height, maxLines: 5, lineHeight: 25)
-    section("Todo", lines: content.todos, x: leftX, top: 288, width: columnWidth, pageHeight: pageSize.height, maxLines: 5, lineHeight: 25)
-    section("Notes", lines: content.notes, x: rightX, top: 288, width: columnWidth, pageHeight: pageSize.height, maxLines: 5, lineHeight: 25)
+    if specs.count == 1 {
+      drawStackedSections(specs, x: margin, top: 112, width: pageSize.width - margin * 2, bottomTop: 430, pageHeight: pageSize.height)
+      return
+    }
+
+    let split = Int(ceil(Double(specs.count) / 2.0))
+    drawStackedSections(
+      Array(specs.prefix(split)),
+      x: margin,
+      top: 112,
+      width: columnWidth,
+      bottomTop: 430,
+      pageHeight: pageSize.height,
+      gap: 16
+    )
+    drawStackedSections(
+      Array(specs.dropFirst(split)),
+      x: margin + columnWidth + gutter,
+      top: 112,
+      width: columnWidth,
+      bottomTop: 430,
+      pageHeight: pageSize.height,
+      gap: 16
+    )
+  }
+
+  private static func sectionSpecs(content: SleepContent, sections: SleepRenderSections) -> [SleepSectionSpec] {
+    var specs: [SleepSectionSpec] = []
+    if sections.weather {
+      specs.append(SleepSectionSpec(title: "Weather", lines: content.weather, maxLines: 3, lineHeight: 25, weight: 1.0))
+    }
+    if sections.calendar {
+      specs.append(SleepSectionSpec(title: "Calendar", lines: content.calendar, maxLines: 5, lineHeight: 25, weight: 1.35))
+    }
+    if sections.todo {
+      specs.append(SleepSectionSpec(title: "Todo", lines: content.todos, maxLines: 12, lineHeight: 28, weight: 2.2))
+    }
+    if sections.notes {
+      specs.append(SleepSectionSpec(title: "Notes", lines: content.notes, maxLines: 4, lineHeight: 25, weight: 1.0))
+    }
+    if sections.hn {
+      specs.append(SleepSectionSpec(title: "HN Top 3", lines: content.hn, maxLines: 3, lineHeight: 34, weight: 1.45))
+    }
+    return specs
+  }
+
+  private static func drawStackedSections(
+    _ specs: [SleepSectionSpec],
+    x: CGFloat,
+    top: CGFloat,
+    width: CGFloat,
+    bottomTop: CGFloat,
+    pageHeight: CGFloat,
+    gap: CGFloat = 18
+  ) {
+    guard !specs.isEmpty else {
+      drawText("No sections enabled", x: x, top: top + 30, width: width, pageHeight: pageHeight, fontSize: 18, weight: .regular, color: .gray)
+      return
+    }
+
+    let totalGap = gap * CGFloat(max(0, specs.count - 1))
+    let availableHeight = max(0, bottomTop - top - totalGap)
+    let totalWeight = max(1, specs.reduce(CGFloat(0)) { $0 + $1.weight })
+    var currentTop = top
+
+    for spec in specs {
+      let height = availableHeight * (spec.weight / totalWeight)
+      let maxLines = max(1, min(spec.maxLines, Int((height - 34) / spec.lineHeight)))
+      section(
+        spec.title,
+        lines: spec.lines,
+        x: x,
+        top: currentTop,
+        width: width,
+        pageHeight: pageHeight,
+        maxLines: maxLines,
+        lineHeight: spec.lineHeight
+      )
+      currentTop += height + gap
+    }
   }
 
   private static func section(
@@ -300,4 +399,13 @@ private struct SleepContent {
   let calendar: [String]
   let weather: [String]
   let notes: [String]
+  let hn: [String]
+}
+
+private struct SleepSectionSpec {
+  let title: String
+  let lines: [String]
+  let maxLines: Int
+  let lineHeight: CGFloat
+  let weight: CGFloat
 }

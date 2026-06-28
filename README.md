@@ -34,8 +34,10 @@ automation can live outside the repo in:
 ~/Library/Application Support/X4SyncServer/SleepInputs/build_sleep_inputs.sh
 ```
 
-That script can update `todos.txt`, `calendar.txt`, `weather.txt`, and
-`notes.txt`; the Mac app turns those files into `/sleep.bmp`.
+That script can update `todos.txt`, `calendar.txt`, `weather.txt`, `notes.txt`,
+and, if desired, `hn.txt`; the Mac app turns enabled sections into `/sleep.bmp`.
+When Hacker News polling is enabled, the app refreshes `hn.txt` automatically
+with the top three story titles, points, and comment counts.
 
 ## Build and Flash This Fork
 
@@ -136,7 +138,7 @@ The app serves a manifest shaped like:
 }
 ```
 
-Sleep-screen inputs are plain text files under `~/Library/Application Support/X4SyncServer/SleepInputs/`. Add an executable `build_sleep_inputs.sh` there to let Shortcuts, shell scripts, or Codex generate todo/calendar/weather inputs before the app renders the 480 x 800 BMP.
+Sleep-screen inputs are plain text files under `~/Library/Application Support/X4SyncServer/SleepInputs/`. The Mac app has per-section toggles for Weather, Calendar, Todo, Notes, and HN. Add an executable `build_sleep_inputs.sh` there to let Shortcuts, shell scripts, or Codex generate inputs before the app renders the 480 x 800 BMP. When Hacker News polling is enabled, the app keeps `hn.txt` updated with the top three story titles, points, and comment counts.
 
 ## Test With a Local Server
 
