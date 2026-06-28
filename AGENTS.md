@@ -10,6 +10,9 @@ work aligned with the current shape of the project.
   - `/manifest.json`
   - `/sleep.bmp`, saved on the X4 as `/sleep.bmp`
   - `/HNLatest.epub`, saved on the X4 as `/HNLatest.epub`
+- The Mac app's `Serve with display off` toggle should use an idle-system-sleep
+  assertion only. Do not switch it to a display-sleep assertion; the display
+  should be allowed to go dark, and lid-close sleep should remain macOS-owned.
 - The X4 should stay dumb and battery-efficient. Do generation, API calls,
   calendar/todo/weather integrations, and Hacker News fetching on the Mac.
 - Sync is best-effort. If Wi-Fi, server, download, or save fails, CrossPoint

@@ -121,6 +121,8 @@ The app shows the server URL to enter on the X4, starts/stops the local HTTP ser
 
 The Server toggle is remembered across app launches. If you want the Mac to serve files after a Mac reboot, also enable `Launch at login`; otherwise the app must be opened manually after login. The app shows `Last Request`, which should update when the X4 requests `/manifest.json`, `/sleep.bmp`, or `/HNLatest.epub`.
 
+The `Serve with display off` toggle keeps the Mac from idle-sleeping while the server is on, but it does not request display wakefulness. The screen can still go dark, and closing the MacBook lid still lets macOS sleep unless the Mac is in a separate clamshell/external-display setup.
+
 The app serves a manifest shaped like:
 
 ```json

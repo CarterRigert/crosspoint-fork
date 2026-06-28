@@ -3,7 +3,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-swift build -c release
+if [[ -z "${CLANG_MODULE_CACHE_PATH:-}" ]]; then
+  export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
+fi
+mkdir -p "$CLANG_MODULE_CACHE_PATH"
+
+if [[ -z "${PYINSTALLER_CONFIG_DIR:-}" ]]; then
+  export PYINSTALLER_CONFIG_DIR="$PWD/.build/pyinstaller-config"
+fi
+mkdir -p "$PYINSTALLER_CONFIG_DIR"
+
+SWIFT_BUILD_ARGS=(-c release)
+if [[ "${X4_SWIFT_DISABLE_SANDBOX:-0}" == "1" ]]; then
+  SWIFT_BUILD_ARGS=(--disable-sandbox "${SWIFT_BUILD_ARGS[@]}")
+fi
+
+swift build "${SWIFT_BUILD_ARGS[@]}"
 
 APP_DIR=".build/app/X4SyncServer.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"

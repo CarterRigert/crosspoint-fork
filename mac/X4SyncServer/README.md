@@ -16,6 +16,8 @@ Settings -> System -> Startup Sync URL
 
 Keep the Server toggle on while the X4 starts or wakes. If you want this to survive a Mac reboot, enable `Launch at login` too; otherwise macOS will not open the app automatically after login.
 
+Enable `Serve with display off` if the Mac should keep serving while the screen goes dark. This blocks idle system sleep only; it does not keep the display awake and it does not override normal lid-close sleep.
+
 The Output section includes `Last Request`. When the X4 syncs, it should show requests such as:
 
 ```text

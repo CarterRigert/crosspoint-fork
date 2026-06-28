@@ -397,7 +397,8 @@ final class AppModel: ObservableObject {
     let shouldKeepAwake = keepAwakeEnabled && serverEnabled
 
     if shouldKeepAwake && keepAwakeAssertionID == 0 {
-      let reason = "X4 Sync Server is serving files" as CFString
+      // Equivalent to `caffeinate -i`: keep serving, but allow display sleep and lid-close sleep.
+      let reason = "X4 Sync Server is serving files while the display may sleep" as CFString
       let result = IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
         IOPMAssertionLevel(kIOPMAssertionLevelOn),
@@ -406,8 +407,8 @@ final class AppModel: ObservableObject {
       )
       if result != kIOReturnSuccess {
         keepAwakeAssertionID = 0
-        lastError = "Could not keep Mac awake."
-        statusMessage = "Could not keep Mac awake."
+        lastError = "Could not keep serving with display off."
+        statusMessage = "Could not keep serving with display off."
       }
     } else if !shouldKeepAwake && keepAwakeAssertionID != 0 {
       IOPMAssertionRelease(keepAwakeAssertionID)
