@@ -10,6 +10,8 @@ struct ContentView: View {
       Divider()
       controls
       Divider()
+      deviceControls
+      Divider()
       outputSummary
       Spacer(minLength: 0)
       footer
@@ -164,6 +166,38 @@ struct ContentView: View {
       }
 
       statusItem("Last Request", model.lastRequestStatus)
+    }
+  }
+
+  private var deviceControls: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Device")
+        .font(.headline)
+
+      HStack(spacing: 12) {
+        statusItem("USB", model.deviceStatus)
+
+        Button {
+          model.refreshDeviceConnection()
+        } label: {
+          Label("Refresh", systemImage: "arrow.clockwise")
+        }
+        .disabled(model.isBusy)
+
+        Button {
+          model.pushServerURLToDevice()
+        } label: {
+          Label("Push Sync URL", systemImage: "link")
+        }
+        .disabled(model.devicePort == nil || model.serverURL.isEmpty || model.isBusy)
+
+        Button {
+          model.flashConnectedX4()
+        } label: {
+          Label("Flash Firmware", systemImage: "bolt")
+        }
+        .disabled(model.devicePort == nil || model.isBusy)
+      }
     }
   }
 

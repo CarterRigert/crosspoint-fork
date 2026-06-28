@@ -544,6 +544,25 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd.startsWith("SET_SYNC_URL ")) {
+        String url = cmd.substring(strlen("SET_SYNC_URL "));
+        url.trim();
+        if (url.length() == 0) {
+          SETTINGS.startupSyncServerUrl[0] = '\0';
+          SETTINGS.saveToFile();
+          logSerial.println("OK:SET_SYNC_URL cleared");
+        } else if (url.indexOf('\n') >= 0 || url.length() >= sizeof(SETTINGS.startupSyncServerUrl)) {
+          logSerial.println("ERR:SET_SYNC_URL invalid");
+        } else {
+          strncpy(SETTINGS.startupSyncServerUrl, url.c_str(), sizeof(SETTINGS.startupSyncServerUrl) - 1);
+          SETTINGS.startupSyncServerUrl[sizeof(SETTINGS.startupSyncServerUrl) - 1] = '\0';
+          if (SETTINGS.saveToFile()) {
+            logSerial.printf("OK:SET_SYNC_URL %s\n", SETTINGS.startupSyncServerUrl);
+            StartupSync::start();
+          } else {
+            logSerial.println("ERR:SET_SYNC_URL save failed");
+          }
+        }
       }
     }
   }

@@ -23,6 +23,8 @@ final class AppModel: ObservableObject {
   @Published var sleepRegenerationStatus: String = "No trigger yet"
   @Published var hnStatus: String = "Not generated"
   @Published var lastRequestStatus: String = "No requests yet"
+  @Published var devicePort: String?
+  @Published var deviceStatus: String = "No USB device detected"
 
   let port: UInt16 = 8080
 
@@ -88,6 +90,7 @@ final class AppModel: ObservableObject {
       updateServerURL()
       try refreshGeneratedFilesIfNeeded()
       try refreshManifest()
+      refreshDeviceConnection()
       scheduleSleepTimer()
       scheduleHNTimer()
       if serverEnabled {
@@ -242,6 +245,53 @@ final class AppModel: ObservableObject {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(sleepTriggerURL, forType: .string)
     statusMessage = "Copied sleep trigger URL."
+  }
+
+  func refreshDeviceConnection() {
+    let ports = DeviceManager.serialPorts()
+    devicePort = ports.first
+    if let port = devicePort {
+      deviceStatus = ports.count == 1 ? port : "\(port) (+\(ports.count - 1) more)"
+    } else {
+      deviceStatus = "No USB device detected"
+    }
+  }
+
+  func flashConnectedX4() {
+    let alert = NSAlert()
+    alert.messageText = "Flash X4 firmware?"
+    alert.informativeText = "This will write the bundled firmware to the connected X4 over USB."
+    alert.addButton(withTitle: "Flash")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+    let port = devicePort
+    runBusyTask("Flashing X4 firmware...") {
+      let message = try await Task.detached {
+        try DeviceManager.flashFirmware(port: port)
+      }.value
+      await MainActor.run {
+        self.statusMessage = message
+        self.lastError = nil
+        self.refreshDeviceConnection()
+      }
+    }
+  }
+
+  func pushServerURLToDevice() {
+    updateServerURL()
+    let url = serverURL
+    let port = devicePort
+    runBusyTask("Pushing sync URL to X4...") {
+      let message = try await Task.detached {
+        try DeviceManager.pushSyncURL(url, port: port)
+      }.value
+      await MainActor.run {
+        self.statusMessage = message
+        self.deviceStatus = "Sync URL saved on X4"
+        self.lastError = nil
+      }
+    }
   }
 
   func openInputsFolder() {
